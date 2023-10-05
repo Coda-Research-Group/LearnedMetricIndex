@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  push:
+    # Sequence of patterns matched against refs/heads
+    branches:    
+      # Push events on main and dev branch
+      - main
+      - dev
+    # Sequence of patterns matched against refs/tags
+    tags: '*'
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Check if 'scripts' directory exists
+      run: |
+        if [ -d "scripts" ]; then
+          echo "scripts directory exists."
+        else
+          echo "scripts directory does not exist, skipping ShellCheck."
+          exit 0
+        fi
+      shell: bash
+
+    - name: Install ShellCheck
+      run: |
+        sudo apt-get update -q && sudo apt-get install -yq shellcheck
+      shell: bash
+
+    - name: Check shell scripts
+      if: ${{ hashFiles('assets/') != '' }}
+      run: |
+        shellcheck scripts/*.sh
+        shellcheck scripts/core/*.sh
+      shell: bash
+
+  black:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Check Python version
+      run: python --version
+
+    - name: Install Black
+      run: |
+        pip install black==23.7.0
+      shell: bash
+
+    - name: Check code formatting with Black
+      run: |
+        black -v --check .
+      shell: bash
+
+  flake8:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Check Python version
+      run: python --version
+
+    - name: Install Flake8
+      run: |
+        pip install flake8==6.1.0
+      shell: bash
+
+    - name: Check code with Flake8
+      run: |
+        flake8 -vv search/**/*.py
+      shell: bash
+
+  test:
+    name: ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - '1.8'
+        os:
+          - ubuntu-latest
+        arch:
+          - x64
+        exclude:
+          - os: macOS-latest
+            arch: x86
+        python-version: ["3.8"]
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: 'true'
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: conda-incubator/setup-miniconda@v2
+        with:
+          auto-update-conda: true
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        shell: bash -el {0}
+        run: |
+          conda create -n env python=3.8
+          conda activate env
+          conda install matplotlib pandas scikit-learn
+          pip install h5py setuptools tqdm faiss-cpu
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Run learned index
+        shell: bash -el {0}
+        run: |
+          conda activate env
+          pip install --editable .
+          python3 search/search.py
+          python3 eval/eval.py
