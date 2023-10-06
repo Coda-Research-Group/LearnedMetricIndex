@@ -76,12 +76,7 @@ python3 eval/plot.py res.csv
 > T. Slanináková, M. Antol, J. Ol'ha, V. Kaňa, V. Dohnal: [Learned Metric Index—Proposition of learned indexing for unstructured data](https://link.springer.com/chapter/10.1007/978-3-030-89657-7_7). SISAP 2021 - Similarity Search and Applications pp 81-94 (2021)
 
 **"LMI in Proteins" (2022):**
-> J. Ol'ha, T. Slanináková, M. Gendiar, M. Antol, V. Dohnal: [Learned Indexing in Proteins: Extended Work on Substituting Complex Distance Calculations with Embedding and Clustering Techniques
-](https://arxiv.org/abs/2208.08910), and [Learned Indexing in Proteins: Substituting Complex Distance Calculations with Embedding and Clustering Techniques](https://link.springer.com/chapter/10.1007/978-3-031-17849-8_22) SISAP 2022 - Similarity Search and Applications pp 274-282 (2022)
-
-**"LMI in Proteins" (2022):**
-> J. Ol'ha, T. Slanináková, M. Gendiar, M. Antol, V. Dohnal: [Learned Indexing in Proteins: Extended Work on Substituting Complex Distance Calculations with Embedding and Clustering Techniques
-](https://arxiv.org/abs/2208.08910), and [Learned Indexing in Proteins: Substituting Complex Distance Calculations with Embedding and Clustering Techniques](https://link.springer.com/chapter/10.1007/978-3-031-17849-8_22) SISAP 2022 - Similarity Search and Applications pp 274-282 (2022)
+> J. Ol'ha, T. Slanináková, M. Gendiar, M. Antol, V. Dohnal: [Learned Indexing in Proteins: Extended Work on Substituting Complex Distance Calculations with Embedding and Clustering Techniques](https://arxiv.org/abs/2208.08910), and [Learned Indexing in Proteins: Substituting Complex Distance Calculations with Embedding and Clustering Techniques](https://link.springer.com/chapter/10.1007/978-3-031-17849-8_22) SISAP 2022 - Similarity Search and Applications pp 274-282 (2022)
 
 **"Reproducible LMI" (2023):**
 - [**Repository**](https://github.com/TerkaSlan/LMIF)
@@ -92,6 +87,6 @@ python3 eval/plot.py res.csv
 ## Team
 - [Terézia Slanináková](https://github.com/TerkaSlan), Masaryk University
 - [David Procházka](https://github.com/ProchazkaDavid), Masaryk University
-- Jaroslav Oľha, Masaryk University
+- [Jaroslav Oľha](https://github.com/JaroOlha), Masaryk University
 - Matej Antol, Masaryk University
 - [Vlastislav Dohnal](https://github.com/dohnal), Masaryk University
