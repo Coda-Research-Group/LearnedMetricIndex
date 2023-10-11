@@ -28,7 +28,8 @@ pip install --editable .
 python3 search/search.py # to run a test run with a small dataset (100K)
 python3 search/search.py --size=10M # to produce a .h5 file with a single experiment result for the 10M set, will be stored in results/. Note that the default script parameters are set to reflect the best found setup. In order to reproduce all the results in result/, set the script parameters to reflect the values stored in the experiment name. Warning: This experiment setup can take hours to complete and requires at least 40GB of RAM.
 
-# Alternatively, start with the complete `results` from Mendeley repository: https://data.mendeley.com/datasets/3dp7jfv2vh/1
+# Alternatively, download the complete `results` from Mendeley repository: https://data.mendeley.com/datasets/3dp7jfv2vh/1, then:
+unzip results.zip
 
 python3 eval/eval.py # to produce a res.csv with evaluations of *.h5 files in results/
 jupyter-lab # to open 02-Analyze-results.ipynb and generate the figures
