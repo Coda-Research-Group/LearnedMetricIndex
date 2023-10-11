@@ -1,13 +1,14 @@
-# Introduction
+# SISAP 2023 Indexing challenge -- Learned Metric Index
 
-Learned Metric Index (LMI) is an index for approximate nearest neighbor search on complex data using machine learning and probability-based navigation. 
-
+This branch contains the code for our submission to the SISAP 2023 Indexing challenge. We used a strip-down version of Learned Metric Index (LMI), which is an index for approximate nearest neighbor search on complex data using machine learning and probability-based navigation.
 
 # Getting started
 
-See examples of how to index and search in a dataset in: [01_Introduction.ipynb](01_Introduction.ipynb) notebook.
+See examples of how to index and search in a dataset in: [01_Introduction.ipynb](01-Introduction.ipynb).
 
-## Installation
+For analysis of our raw results (on [Mendeley](https://data.mendeley.com/datasets/3dp7jfv2vh/1)) and reproducing our figures, see: [02-Analyze-results.ipynb](02-Analyze-results.ipynb).
+
+## Installation of the repository
 
 See also ``.github/workflows/ci.yml``
 
@@ -21,21 +22,16 @@ pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install --editable .
 ```
 
-## Running
+## Reproducing the results
 
 ```bash
-jupyter-lab
-# and open 01_Introduction.ipynb
+python3 search/search.py # to run a test run with a small dataset (100K)
+python3 search/search.py --size=10M # to produce a .h5 file with a single experiment result for the 10M set, will be stored in results/. Note that the default script parameters are set to reflect the best found setup. In order to reproduce all the results in result/, set the script parameters to reflect the values stored in the experiment name. Warning: This experiment setup can take hours to complete and requires at least 40GB of RAM.
 
-# or
-python3 search/search.py
-```
+# Alternatively, start with the complete `results` from Mendeley repository: https://data.mendeley.com/datasets/3dp7jfv2vh/1
 
-## Evaluation
-
-```bash
-python3 eval/eval.py
-python3 eval/plot.py res.csv
+python3 eval/eval.py # to produce a res.csv with evaluations of *.h5 files in results/
+jupyter-lab # to open 02-Analyze-results.ipynb and generate the figures
 ```
 
 ## Performance

@@ -22,4 +22,3 @@ search/*.log
 logs/
 .idea/
 .vscode/
-res.csv

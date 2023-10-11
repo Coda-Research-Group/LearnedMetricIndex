@@ -311,12 +311,12 @@ if __name__ == "__main__":
         "--size", default="100K", choices=["100K", "300K", "10M", "30M", "100M"]
     )
     parser.add_argument("--k", default=10, type=int)
-    parser.add_argument("--n-categories", nargs="+", default=[10, 10], type=int)
-    parser.add_argument("--epochs", nargs="+", default=[100], type=int)
+    parser.add_argument("--n-categories", nargs="+", default=[123], type=int)
+    parser.add_argument("--epochs", nargs="+", default=[200], type=int)
     parser.add_argument("--model-type", nargs="+", default=["MLP"])
     parser.add_argument("--lr", nargs="+", default=[0.01], type=float)
     parser.add_argument("-b", "--n-buckets", nargs="+", default=[2, 3, 4], type=int)
-    parser.add_argument("-bp", "--buckets-perc", nargs="+", default=[10], type=int)
+    parser.add_argument("-bp", "--buckets-perc", nargs="+", default=[4], type=int)
     parser.add_argument("--preprocess", default=True, type=bool)
     parser.add_argument("--save", default=True, type=bool)
     parser.add_argument(
