@@ -9,33 +9,43 @@ See examples of how to index and search in a dataset in: [01_Introduction.ipynb]
 
 ## Installation
 
-See also ``.github/workflows/ci.yml``
-
-### Using conda
+### Using virtualenv
 ```bash
-conda create -n env python=3.8
-conda activate env
-conda install matplotlib pandas scikit-learn jupyterlab
-pip install h5py flake8 setuptools tqdm faiss-cpu
-pip install torch --index-url https://download.pytorch.org/whl/cpu
+# 1) Clone the repo with submodules 
+git clone --recursive git@github.com:LearnedMetricIndex/LearnedMetricIndex.git
+# 2) Create and activate a new virtual environment
+python -m venv lmi-env
+source lmi-env/bin/activate
+# 3) Install the dependencies
+pip install -r requirements-cpu.txt # alternatively requirements-gpu.txt
 pip install --editable .
+```
+
+### Using docker
+
+Requirements:
+- [Docker](https://docs.docker.com/get-docker/)
+- At least 1.5 gb disk space for the CPU and up to 5.5 gb for the GPU version
+
+```bash
+# 1) Clone the repo with submodules 
+git clone --recursive git@github.com:LearnedMetricIndex/LearnedMetricIndex.git
+# 2) Build the docker image (CPU version)
+docker build -t lmi -f Dockerfile --build-arg version=cpu .
+# alternatively: docker build -t lmi -f Dockerfile --build-arg version=gpu .
+# 3) Run the docker image
+docker run -p 8888:8888 -it lmi bash
 ```
 
 ## Running
 
 ```bash
-jupyter-lab
-# and open 01_Introduction.ipynb
+# Run jupyterlab, copy the outputted url into the browser and open 01_Introduction.ipynb
+jupyter-lab --ip 0.0.0.0 --no-browser
 
-# or
-python3 search/search.py
-```
-
-## Evaluation
-
-```bash
-python3 eval/eval.py
-python3 eval/plot.py res.csv
+# Run the search on 100k data subset, evaluate the results and plot them.
+# Expected time to run = ~5-10 mins
+python3 search/search.py && python eval/eval.py && python eval/plot.py res.csv
 ```
 
 ## Performance

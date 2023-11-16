@@ -16,6 +16,7 @@ def cluster(
     _, d = data.shape
 
     kmeans = Kmeans(d=d, k=n_clusters, **parameters)
+    data = np.ascontiguousarray(data.astype(np.float32))
     kmeans.train(data)
 
     labels = kmeans.index.search(data, 1)[1].T[0]  # type: ignore
