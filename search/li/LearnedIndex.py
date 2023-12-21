@@ -9,10 +9,10 @@ import numpy.typing as npt
 import pandas as pd
 import torch
 import torch.utils.data
-from li.Logger import Logger
-from li.model import NeuralNetwork, data_X_to_torch
-from li.PriorityQueue import EMPTY_VALUE, PriorityQueue
-from li.utils import filter_path_idxs, log_runtime
+from chromadb.li_index.search.li.Logger import Logger
+from chromadb.li_index.search.li.model import NeuralNetwork, data_X_to_torch
+from chromadb.li_index.search.li.PriorityQueue import EMPTY_VALUE, PriorityQueue
+from chromadb.li_index.search.li.utils import filter_path_idxs, log_runtime
 from tqdm import tqdm
 
 torch.manual_seed(2023)
@@ -355,6 +355,11 @@ class LearnedIndex(Logger):
             if bucket_obj_indexes.shape[0] != 0 and relevant_query_idxs.shape[0] != 0:
                 queries_for_this_bucket = queries_search[relevant_query_idxs]
                 data_in_this_bucket = data_search.loc[bucket_obj_indexes].to_numpy()
+
+                # Remove L categories from the data_in_this_bucket
+                # TODO this is hotfix that impacts performance figure out how to prevent L cat being added to data_in_this_bucket
+                l_cat_columns = data_in_this_bucket.shape[1] - queries_for_this_bucket.shape[1]
+                data_in_this_bucket = data_in_this_bucket[:, :-l_cat_columns]
 
                 s = time.time()
                 similarity, indices = faiss.knn(

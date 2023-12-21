@@ -1,5 +1,5 @@
-from li.Logger import Logger
-from li.utils import pairwise_cosine
+from chromadb.li_index.search.li.Logger import Logger
+from chromadb.li_index.search.li.utils import pairwise_cosine
 import time
 import numpy as np
 

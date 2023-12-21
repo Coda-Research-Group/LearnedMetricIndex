@@ -5,8 +5,8 @@ import numpy as np
 import torch
 import torch.nn.functional as nnf
 import torch.utils.data
-from li.clustering import ClusteringAlgorithm
-from li.Logger import Logger
+from chromadb.li_index.search.li.clustering import ClusteringAlgorithm
+from chromadb.li_index.search.li.Logger import Logger
 from torch import nn
 from torch.nn import Linear, ReLU, Sequential
 

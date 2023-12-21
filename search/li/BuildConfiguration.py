@@ -1,8 +1,8 @@
 from dataclasses import dataclass, field
 from typing import Any, List, Union
 
-from li.clustering import ClusteringAlgorithm
-from li.model import ModelParameters
+from chromadb.li_index.search.li.clustering import ClusteringAlgorithm
+from chromadb.li_index.search.li.model import ModelParameters
 
 
 @dataclass

@@ -8,13 +8,13 @@ import numpy.typing as npt
 import pandas as pd
 import torch
 import torch.utils.data
-from li.BuildConfiguration import BuildConfiguration
-from li.clustering import ClusteringAlgorithm
-from li.LearnedIndex import LearnedIndex
-from li.Logger import Logger
-from li.model import LIDataset, ModelParameters, NeuralNetwork, data_X_to_torch
-from li.PriorityQueue import EMPTY_VALUE
-from li.utils import filter_path_idxs, log_runtime
+from chromadb.li_index.search.li.BuildConfiguration import BuildConfiguration
+from chromadb.li_index.search.li.clustering import ClusteringAlgorithm
+from chromadb.li_index.search.li.LearnedIndex import LearnedIndex
+from chromadb.li_index.search.li.Logger import Logger
+from chromadb.li_index.search.li.model import LIDataset, ModelParameters, NeuralNetwork, data_X_to_torch
+from chromadb.li_index.search.li.PriorityQueue import EMPTY_VALUE
+from chromadb.li_index.search.li.utils import filter_path_idxs, log_runtime
 from tqdm import tqdm
 
 
