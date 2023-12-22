@@ -1,7 +1,7 @@
 import time
 from collections import defaultdict
 from logging import DEBUG, INFO
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 import faiss
 import numpy as np
@@ -13,6 +13,7 @@ from chromadb.li_index.search.li.Logger import Logger
 from chromadb.li_index.search.li.model import NeuralNetwork, data_X_to_torch
 from chromadb.li_index.search.li.PriorityQueue import EMPTY_VALUE, PriorityQueue
 from chromadb.li_index.search.li.utils import filter_path_idxs, log_runtime
+from chromadb.li_index.search.attribtue_filtering.default_filtering import attribute_filtering
 from tqdm import tqdm
 
 torch.manual_seed(2023)
@@ -48,7 +49,11 @@ class LearnedIndex(Logger):
         n_categories: List[int],
         n_buckets: int = 1,
         k: int = 10,
-    ) -> Tuple[npt.NDArray, npt.NDArray[np.uint32], Dict[str, float]]:
+        # CONSTRAINT MODIFICATION START
+        attribute_filter: Optional[npt.NDArray[np.uint32]] = None,
+        constraint_weight=0.0
+        # CONSTRAINT MODIFICATION END
+    ) -> Tuple[npt.NDArray, npt.NDArray[np.uint32], npt.NDArray, Dict[str, float]]:
         """Searches for `k` nearest neighbors for each query in `queries`.
 
         Implementation details:
@@ -95,6 +100,11 @@ class LearnedIndex(Logger):
             queries_navigation=queries_navigation,
             n_buckets=n_buckets,
             n_categories=n_categories,
+            # CONSTRAINT MODIFICATION START
+            data_prediction=data_prediction,
+            attribute_filter=attribute_filter,
+            constraint_weight=constraint_weight
+            # CONSTRAINT MODIFICATION END
         )
 
         # Add bucket location to each object as searching is done sequentially per bucket
@@ -114,6 +124,9 @@ class LearnedIndex(Logger):
                 queries_search=queries_search,
                 bucket_path=bucket_order[:, bucket_order_idx, :],
                 n_levels=n_levels,
+                # CONSTRAINT MODIFICATION START
+                attribute_filter=attribute_filter,
+                # CONSTRAINT MODIFICATION END
             )
 
             measured_time["search_within_buckets"] += t_all
@@ -158,7 +171,7 @@ class LearnedIndex(Logger):
 
         measured_time["search"] = time.time() - s
 
-        return dists_final, anns_final, measured_time
+        return dists_final, anns_final, bucket_order, measured_time
 
     @log_runtime(INFO, "Precomputed bucket order time: {}")
     def _precompute_bucket_order(
@@ -166,6 +179,11 @@ class LearnedIndex(Logger):
         queries_navigation: npt.NDArray[np.float32],
         n_buckets: int,
         n_categories: List[int],
+        # CONSTRAINT MODIFICATION START
+        data_prediction: npt.NDArray[np.int64] = None,
+        attribute_filter: Optional[npt.NDArray[np.uint32]]=None,
+        constraint_weight: float=0.0,
+        # CONSTRAINT MODIFICATION END
     ) -> Tuple[npt.NDArray[np.int32], float]:
         """
         Precomputes the order in which the queries visit the buckets.
@@ -207,6 +225,37 @@ class LearnedIndex(Logger):
         total_inference_t += time.time() - s
 
         if n_levels == 1:
+            # CONSTRAINT MODIFICATION START
+            # Shift back by minus one so we can access the correct index in data_prediction
+            shifted_attribute_filters = attribute_filter - 1
+
+            attribute_filter_to_buckets = np.array(
+                [data_prediction[filter_array] for filter_array in shifted_attribute_filters])
+
+            constraint_ratios = np.zeros_like(pred_l1_paths, dtype=float)
+
+            for i, (pred_array, result_array) in enumerate(zip(pred_l1_paths, attribute_filter_to_buckets)):
+                # Count occurrences of constr object in each bucket
+                unique_elements, counts = np.unique(result_array, return_counts=True)
+                element_counts = dict(zip(unique_elements, counts))
+
+                # Calculate the representation ratio for each filter
+                total_elements = result_array.size
+                constraint_ratios[i] = [element_counts.get(element, 0) / total_elements for element in pred_array]
+
+            model_weight = 1 - constraint_weight
+            # TODO: maybe consider normalization since floating point rounding errors can cause the sum to be > 1
+            weighted_probabilities = model_weight * pred_l1_prob + constraint_weight * constraint_ratios
+
+            # Reorder pred_l1_paths based on the descending order of weighted_probabilities
+            # First, get the indices that would sort weighted_probabilities in descending order
+            sort_indices = np.argsort(-weighted_probabilities, axis=1)
+
+            # Use these indices to reorder both weighted_probabilities and pred_l1_paths
+            weighted_probabilities = np.take_along_axis(weighted_probabilities, sort_indices, axis=1)
+            pred_l1_paths = np.take_along_axis(pred_l1_paths, sort_indices, axis=1)
+            # CONSTRAINT MODIFICATION END
+
             bucket_order = np.full(
                 (n_queries, n_buckets, n_levels), fill_value=EMPTY_VALUE, dtype=np.int32
             )
@@ -333,6 +382,9 @@ class LearnedIndex(Logger):
         bucket_path: npt.NDArray[np.int32],
         k: int = 10,
         n_levels: int = 1,
+        # CONSTRAINT MODIFICATION START
+        attribute_filter: Optional[npt.NDArray[np.uint32]] = None,
+        # CONSTRAINT MODIFICATION END
     ) -> Tuple[npt.NDArray, npt.NDArray[np.uint32], float, float, float]:
         s_all = time.time()
 
@@ -356,10 +408,12 @@ class LearnedIndex(Logger):
                 queries_for_this_bucket = queries_search[relevant_query_idxs]
                 data_in_this_bucket = data_search.loc[bucket_obj_indexes].to_numpy()
 
+                # CONSTRAINT MODIFICATION START
                 # Remove L categories from the data_in_this_bucket
                 # TODO this is hotfix that impacts performance figure out how to prevent L cat being added to data_in_this_bucket
                 l_cat_columns = data_in_this_bucket.shape[1] - queries_for_this_bucket.shape[1]
                 data_in_this_bucket = data_in_this_bucket[:, :-l_cat_columns]
+                # CONSTRAINT MODIFICATION END
 
                 s = time.time()
                 similarity, indices = faiss.knn(
@@ -370,9 +424,18 @@ class LearnedIndex(Logger):
                 )
                 t_seq_search += time.time() - s
 
+                # CONSTRAINT MODIFICATION START
                 distances = 1 - similarity
 
-                nns[relevant_query_idxs] = bucket_obj_indexes.to_numpy()[indices]
+                # TODO: this is not correct, bucket level filtering should be performed before distance computation
+                if attribute_filter is not None:
+                    indices = attribute_filtering(indices, attribute_filter, bucket_obj_indexes)
+
+                nns[relevant_query_idxs] = bucket_obj_indexes.append(pd.Index([0])).to_numpy()[indices]
+                if attribute_filter is not None:
+                    distances[nns == 0] = np.inf
+                # CONSTRAINT MODIFICATION END
+
                 dists[relevant_query_idxs] = distances
 
         return dists, nns, time.time() - s_all, t_seq_search, t_sort

@@ -6,6 +6,7 @@ from chromadb.li_index.search import ChromaIndex
 from chromadb.li_index.search.li.LearnedIndexBuilder import LearnedIndexBuilder
 from chromadb.li_index.search.li.BuildConfiguration import BuildConfiguration
 from chromadb.li_index.search.li.clustering import ClusteringAlgorithm
+from sklearn import preprocessing
 from typing import List, Optional, Union, Sequence
 
 
@@ -59,6 +60,9 @@ class LMI(ChromaIndex):
         )
 
     def build_index(self):
+        # normalize dataset
+        self._dataset = preprocessing.normalize(self._dataset)
+
         # Convert dataset to pandas and shift its index by one if it starts at zero
         data_for_build = pd.DataFrame(self._dataset)
         if data_for_build.index.start == 0:
@@ -76,15 +80,18 @@ class LMI(ChromaIndex):
     def knn_query(self, data, k=1, n_buckets=1, use_threshold=False, constraint_weight=0.0, num_threads=-1, filter=None, *args, **kwargs)\
             -> (np.ndarray, np.ndarray, np.ndarray):
         data_for_build = pd.DataFrame(self._dataset)
+
+        # TODO: this operation should be performed in the build_index method
         if data_for_build.index.start == 0:
             data_for_build.index += 1
 
         data_converted = np.array(data)
+        data_converted = preprocessing.normalize(data_converted)
 
         if filter is not None:
             filter = np.array([filter])
 
-        dists, nns, measured_time = self._internal_index.search(
+        dists, nns, bucket_order, measured_time = self._internal_index.search(
             data_navigation=data_for_build,
             queries_navigation=data_converted,
             data_search=data_for_build,
@@ -93,13 +100,11 @@ class LMI(ChromaIndex):
             n_categories=self._n_categories,
             n_buckets=n_buckets,
             k=k,
-            # use_threshold=use_threshold,
-            # attribute_filter=filter,
-            # constraint_weight=constraint_weight
+            attribute_filter=filter,
+            constraint_weight=constraint_weight
         )
 
-        # TODO: add back bucket_order
-        return nns, dists, np.array([[[0], [1], [2], [3]]])
+        return nns, dists, bucket_order
 
     def get_items(self, ids=None):
         return self._dataset
