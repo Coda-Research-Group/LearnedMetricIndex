@@ -1,6 +1,7 @@
 import numpy as np
 import warnings
 from itertools import product
+from typing import List, Tuple, Dict, Optional
 
 def attribute_filtering(indices, attribute_filter, bucket_obj_indexes):
     """
@@ -148,3 +149,58 @@ def combine_probabilities(filters_ratios):
         combined_filters_ratios.append(combined_ratio)  # Append the updated dictionary
 
     return combined_filters_ratios
+
+
+def path_children_from_categories(path, categories):
+    """
+    Create new tuples by iterating over items in each element of the categories array,
+    and replace the first occurrence of -1 in the 'path' tuple with the iterated item.
+
+    Parameters:
+    path (tuple): A tuple containing one or more elements, one of which may be -1 to be replaced.
+    categories (array-like): An array or list of lists, where each inner list contains items to replace the -1 in the path.
+
+    Returns:
+    list of lists: A list containing lists of tuples, where each tuple is a version of the original path
+                   with the first occurrence of -1 replaced by one of the items from the corresponding element in categories.
+
+    """
+    result = []
+    for category_list in categories:
+        current_result = []
+        for item in category_list:
+            new_path = []
+            replaced = False
+            for p in path:
+                if p == -1 and not replaced:
+                    new_path.append(item)
+                    replaced = True
+                else:
+                    new_path.append(p)
+            current_result.append(tuple(new_path))
+        result.append(current_result)
+    return result
+
+
+def get_children_probabilities(path_children: List[List[Tuple[int, int]]],
+                               constraint_tree_ratios: Optional[List[Dict[Tuple[int, ...], float]]]) -> np.ndarray:
+    """
+    Retrieves selected probabilities from a list of dictionaries based on provided paths.
+
+    Parameters:
+    - path_children (List[List[Tuple[int, int]]]): A list of lists containing tuples.Each tuple represents a key
+    in the dictionaries of constraint_tree_ratios.
+
+    - constraint_tree_ratios (List[Dict[Tuple[int, int], float]]): A list of dictionaries. Each dictionary contains
+    tuples of integers as keys and float probabilities as values.
+
+    Returns:
+    - np.ndarray: A numpy array of arrays, each subarray contains selected probabilities
+      from corresponding dictionaries based on path_children tuples.
+    """
+    children_probabilities = []
+    for i, paths in enumerate(path_children):
+        selected_values = [constraint_tree_ratios[i][path] for path in paths]
+        children_probabilities.append(selected_values)
+
+    return np.array(children_probabilities)

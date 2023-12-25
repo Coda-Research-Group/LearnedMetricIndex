@@ -13,7 +13,12 @@ from chromadb.li_index.search.li.Logger import Logger
 from chromadb.li_index.search.li.model import NeuralNetwork, data_X_to_torch
 from chromadb.li_index.search.li.PriorityQueue import EMPTY_VALUE, PriorityQueue
 from chromadb.li_index.search.li.utils import filter_path_idxs, log_runtime
-from chromadb.li_index.search.attribtue_filtering.default_filtering import attribute_filtering
+from chromadb.li_index.search.attribtue_filtering.default_filtering import (attribute_filtering,
+                                                                            precompute_bucket_ids,
+                                                                            compute_ratios_for_attribute_filters,
+                                                                            combine_probabilities,
+                                                                            path_children_from_categories,
+                                                                            get_children_probabilities)
 from tqdm import tqdm
 
 torch.manual_seed(2023)
@@ -224,9 +229,10 @@ class LearnedIndex(Logger):
         )
         total_inference_t += time.time() - s
 
+        model_weight = 1 - constraint_weight
         if n_levels == 1:
             # CONSTRAINT MODIFICATION START
-            if attribute_filter is not None:
+            if constraint_weight > 0:
                 # Shift back by -1, so we can access the correct index in data_prediction
                 shifted_attribute_filters = attribute_filter - 1
 
@@ -246,7 +252,6 @@ class LearnedIndex(Logger):
                     total_elements = result_array.size
                     constraint_ratios[i] = [element_counts.get(element, 0) / total_elements for element in pred_array]
 
-                model_weight = 1 - constraint_weight
                 # TODO: maybe consider normalization since floating point rounding errors can cause the sum to be > 1
                 weighted_probabilities = model_weight * pred_l1_prob + constraint_weight * constraint_ratios
 
@@ -268,6 +273,16 @@ class LearnedIndex(Logger):
         queue_length_upper_bound = int(np.prod(n_categories))
         pq = PriorityQueue(n_queries, queue_length_upper_bound, n_levels)
 
+        # CONSTRAINT MODIFICATION START
+        bucket_ids = None
+        constraint_bucket_ratios = None
+        constraint_tree_ratios = None
+        if constraint_weight > 0:
+            bucket_ids = precompute_bucket_ids(n_categories)
+            constraint_bucket_ratios = compute_ratios_for_attribute_filters(data_prediction, attribute_filter, n_categories)
+            constraint_tree_ratios = combine_probabilities(constraint_bucket_ratios)
+        # CONSTRAINT MODIFICATION END
+
         # Populates the priority queue with the first level of the index
         # * Relies on the fact that the pred_l1_categories and pred_l1_probs are sorted,
         # * therefore the priority queue does not need to be sorted after this for loop
@@ -276,7 +291,17 @@ class LearnedIndex(Logger):
                 (n_queries, n_levels), fill_value=EMPTY_VALUE, dtype=np.int32
             )
             l1_paths[:, 0] = pred_l1_paths[:, l1_idx]
-            pq.add(np.arange(n_queries), l1_paths, pred_l1_prob[:, l1_idx])
+
+            # CONSTRAINT MODIFICATION START
+            final_l1_prob = pred_l1_prob[:, l1_idx]
+            if constraint_weight > 0:
+                tuple_l1_paths = [tuple(row) for row in l1_paths]
+                # Selecting values from the dictionaries based on the tuple keys
+                constraint_l1_propb = np.array([constraint_tree_ratios[i][tuple_l1_paths[i]] for i in range(len(tuple_l1_paths))])
+                final_l1_prob = model_weight * final_l1_prob + constraint_weight * constraint_l1_propb
+            # CONSTRAINT MODIFICATION END
+
+            pq.add(np.arange(n_queries), l1_paths, final_l1_prob)
 
         bucket_order = np.full(
             (n_queries, n_buckets, n_levels), fill_value=EMPTY_VALUE, dtype=np.int32
@@ -288,7 +313,8 @@ class LearnedIndex(Logger):
             path_to_visit = pq.pop(query_idxs)
 
             inference_t = self._visit_internal_nodes(
-                queries_navigation, query_idxs, pq, path_to_visit, n_levels
+                queries_navigation, query_idxs, pq, path_to_visit,
+                n_levels, constraint_weight, constraint_tree_ratios
             )
             self._visit_buckets(
                 query_idxs,
@@ -310,6 +336,8 @@ class LearnedIndex(Logger):
         pq: PriorityQueue,
         path_to_visit: npt.NDArray[np.int32],
         n_levels: int,
+        constraint_weight: float = 0.0,
+        constraint_tree_ratios: Optional[List[Dict[Tuple[int, ...], float]]] = None
     ) -> float:
         """
         Visits the internal nodes specified by `paths`.
@@ -330,6 +358,14 @@ class LearnedIndex(Logger):
             probabilities, categories = model.predict_proba(
                 data_X_to_torch(queries_navigation[query_idxs])
             )
+
+            # CONSTRAINT MODIFICATION START
+            if constraint_weight > 0:
+                path_children = path_children_from_categories(path, categories)
+                constraint_probabilities = get_children_probabilities(path_children, constraint_tree_ratios)
+                probabilities = (1 - constraint_weight) * probabilities + constraint_weight * constraint_probabilities
+            # CONSTRAINT MODIFICATION END
+
             total_inference_t += time.time() - s
 
             level = len(path) - path.count(EMPTY_VALUE)
