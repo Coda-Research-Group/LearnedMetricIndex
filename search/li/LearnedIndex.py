@@ -226,34 +226,37 @@ class LearnedIndex(Logger):
 
         if n_levels == 1:
             # CONSTRAINT MODIFICATION START
-            # Shift back by minus one so we can access the correct index in data_prediction
-            shifted_attribute_filters = attribute_filter - 1
+            if attribute_filter is not None:
+                # Shift back by -1, so we can access the correct index in data_prediction
+                shifted_attribute_filters = attribute_filter - 1
 
-            attribute_filter_to_buckets = np.array(
-                [data_prediction[filter_array] for filter_array in shifted_attribute_filters])
+                # This leaves us only with bucket ids that satisfy the constraint
+                attribute_filter_to_buckets = np.array(
+                    [data_prediction[filter_array] for filter_array in shifted_attribute_filters])
 
-            constraint_ratios = np.zeros_like(pred_l1_paths, dtype=float)
+                # Initialize constraint_ratios to be of same shape as pred_l1_paths since we combine them later
+                constraint_ratios = np.zeros_like(pred_l1_paths, dtype=float)
 
-            for i, (pred_array, result_array) in enumerate(zip(pred_l1_paths, attribute_filter_to_buckets)):
-                # Count occurrences of constr object in each bucket
-                unique_elements, counts = np.unique(result_array, return_counts=True)
-                element_counts = dict(zip(unique_elements, counts))
+                for i, (pred_array, result_array) in enumerate(zip(pred_l1_paths, attribute_filter_to_buckets)):
+                    # Count occurrences of constr object in each bucket
+                    unique_elements, counts = np.unique(result_array, return_counts=True)
+                    element_counts = dict(zip(unique_elements, counts))
 
-                # Calculate the representation ratio for each filter
-                total_elements = result_array.size
-                constraint_ratios[i] = [element_counts.get(element, 0) / total_elements for element in pred_array]
+                    # Calculate the representation ratio for each filter
+                    total_elements = result_array.size
+                    constraint_ratios[i] = [element_counts.get(element, 0) / total_elements for element in pred_array]
 
-            model_weight = 1 - constraint_weight
-            # TODO: maybe consider normalization since floating point rounding errors can cause the sum to be > 1
-            weighted_probabilities = model_weight * pred_l1_prob + constraint_weight * constraint_ratios
+                model_weight = 1 - constraint_weight
+                # TODO: maybe consider normalization since floating point rounding errors can cause the sum to be > 1
+                weighted_probabilities = model_weight * pred_l1_prob + constraint_weight * constraint_ratios
 
-            # Reorder pred_l1_paths based on the descending order of weighted_probabilities
-            # First, get the indices that would sort weighted_probabilities in descending order
-            sort_indices = np.argsort(-weighted_probabilities, axis=1)
+                # Reorder pred_l1_paths based on the descending order of weighted_probabilities
+                # First, get the indices that would sort weighted_probabilities in descending order
+                sort_indices = np.argsort(-weighted_probabilities, axis=1)
 
-            # Use these indices to reorder both weighted_probabilities and pred_l1_paths
-            weighted_probabilities = np.take_along_axis(weighted_probabilities, sort_indices, axis=1)
-            pred_l1_paths = np.take_along_axis(pred_l1_paths, sort_indices, axis=1)
+                # Use these indices to reorder both weighted_probabilities and pred_l1_paths
+                weighted_probabilities = np.take_along_axis(weighted_probabilities, sort_indices, axis=1)
+                pred_l1_paths = np.take_along_axis(pred_l1_paths, sort_indices, axis=1)
             # CONSTRAINT MODIFICATION END
 
             bucket_order = np.full(

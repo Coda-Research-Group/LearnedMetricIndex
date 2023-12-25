@@ -11,10 +11,12 @@ def cluster(
     parameters: Optional[Dict[str, Any]],
 ) -> Tuple[Kmeans, npt.NDArray[np.int32]]:
     if parameters is None:
-        parameters = {"verbose": False, "seed": 2023}
+        # TODO: added "nredo" to make KMeans more reliable, parametrize this in LVD if it cause too long index build time
+        parameters = {"verbose": False, "seed": 2023, "nredo": 10}
 
     _, d = data.shape
 
+    print('FAISS Kmeans parameters', parameters)
     kmeans = Kmeans(d=d, k=n_clusters, **parameters)
     kmeans.train(data)
 
