@@ -22,7 +22,7 @@ def attribute_filtering(indices, attribute_filter, bucket_obj_indexes):
 
     for i_row, f_row in zip(indices, attribute_filter):
         if i_row.size != bucket_obj_indexes.size:
-            warnings.warn("\n WARNING: Ann relative is bigger than the number of objects in the bucket. This usually caused by Threshold optimization!\n")
+            # warnings.warn("\n WARNING: Indices do not match size of bucket_obj_indexes.\n")
             i_row = i_row[i_row < bucket_obj_indexes.size]
 
         # Perform mapping from bucket indices to object indicies
