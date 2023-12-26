@@ -11,8 +11,7 @@ def cluster(
     parameters: Optional[Dict[str, Any]],
 ) -> Tuple[Kmeans, npt.NDArray[np.int32]]:
     if parameters is None:
-        # TODO: added "nredo" to make KMeans more reliable, parametrize this in LVD if it cause too long index build time
-        parameters = {"verbose": False, "seed": 2023, "nredo": 10}
+        parameters = {"verbose": False, "seed": 2023}
 
     _, d = data.shape
 

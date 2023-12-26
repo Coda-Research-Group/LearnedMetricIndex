@@ -29,7 +29,16 @@ class ChromaIndex(ABC):
         pass
 
     @abstractmethod
-    def init_index(self, max_elements, algorithms: List[ClusteringAlgorithm], epochs: [int], model: [str], learning_rate: [int], n_categories: [int],  is_persistent_index=False, persistence_location=None):
+    def init_index(self,
+                   max_elements,
+                   algorithms: List[ClusteringAlgorithm],
+                   epochs: [int],
+                   model: [str],
+                   learning_rate: [int],
+                   n_categories: [int],
+                   kmeans: dict,
+                   is_persistent_index=False,
+                   persistence_location=None):
         pass
 
     @abstractmethod

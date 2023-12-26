@@ -7,7 +7,7 @@ from chromadb.li_index.search.li.LearnedIndexBuilder import LearnedIndexBuilder
 from chromadb.li_index.search.li.BuildConfiguration import BuildConfiguration
 from chromadb.li_index.search.li.clustering import ClusteringAlgorithm
 from sklearn import preprocessing
-from typing import List, Optional, Union, Sequence
+from typing import List, Optional, Union, Sequence, Dict
 
 
 class LMI(ChromaIndex):
@@ -37,6 +37,7 @@ class LMI(ChromaIndex):
                    model_types: [str],
                    learning_rate: Optional[List[int]],
                    n_categories: Optional[List[int]],
+                   kmeans: Optional[Dict],
                    is_persistent_index=False,
                    persistence_location=None
                    ):
@@ -57,6 +58,7 @@ class LMI(ChromaIndex):
             model_types,
             learning_rate,
             n_categories,
+            kmeans=kmeans
         )
 
     def build_index(self):

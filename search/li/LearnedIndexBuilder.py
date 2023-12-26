@@ -298,7 +298,7 @@ class LearnedIndexBuilder(Logger):
         clustering_object, labels = clustering_algorithm(
             np.array(data),
             n_clusters,
-            None,
+            self.config.kmeans,
         )
 
         return clustering_object, labels, time.time() - s
