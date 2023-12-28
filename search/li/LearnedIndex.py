@@ -105,6 +105,7 @@ class LearnedIndex(Logger):
         # CONSTRAINT MODIFICATION START
         # TODO: this is not ideal since we are computing always full bucket order
         # TODO: this is quick fix, find other solution that increase n_buckets in _precompute_bucket_order based on attribute_filter
+        # TODO: total buckets can be computed during build time
         n_buckets_precompute = n_buckets
         if attribute_filter is not None:
             total_buckets = np.prod(n_categories)
@@ -142,6 +143,7 @@ class LearnedIndex(Logger):
                 queries_search=queries_search,
                 bucket_path=bucket_order[:, bucket_order_idx, :],
                 n_levels=n_levels,
+                k=k,
                 # CONSTRAINT MODIFICATION START
                 attribute_filter=attribute_filter,
                 # CONSTRAINT MODIFICATION END
@@ -187,6 +189,8 @@ class LearnedIndex(Logger):
             # CONSTRAINT MODIFICATION END
 
             self.logger.debug(f"Sorted the results in: {time.time() - t}")
+
+        print("Number of buckets searched: ", n_buckets)
 
         assert dists_final is not None
         assert anns_final is not None
@@ -462,13 +466,18 @@ class LearnedIndex(Logger):
         t_seq_search = 0.0
         t_sort = 0.0
 
-        for path, g in tqdm(data_navigation.groupby(possible_bucket_paths)):
+        for path, g in data_navigation.groupby(possible_bucket_paths):
             bucket_obj_indexes = g.index
 
             relevant_query_idxs = filter_path_idxs(bucket_path, path)
 
             if bucket_obj_indexes.shape[0] != 0 and relevant_query_idxs.shape[0] != 0:
                 queries_for_this_bucket = queries_search[relevant_query_idxs]
+                # Perform bucket level attribute filtering
+                if attribute_filter is not None:
+                    # TODO: this filter is not applied for all queries, therefore multiple filters for multiple queries are not supported
+                    # TODO: not sure how to support separate filter for each query because of faiss.kmeans
+                    bucket_obj_indexes = bucket_obj_indexes[np.in1d(bucket_obj_indexes, attribute_filter[0])]
                 data_in_this_bucket = data_search.loc[bucket_obj_indexes].to_numpy()
 
                 # CONSTRAINT MODIFICATION START
@@ -489,10 +498,6 @@ class LearnedIndex(Logger):
 
                 # CONSTRAINT MODIFICATION START
                 distances = 1 - similarity
-
-                # TODO: this is not correct, bucket level filtering should be performed before distance computation
-                if attribute_filter is not None:
-                    indices = attribute_filtering(indices, attribute_filter, bucket_obj_indexes)
 
                 nns[relevant_query_idxs] = bucket_obj_indexes.append(pd.Index([0])).to_numpy()[indices]
                 if attribute_filter is not None:
