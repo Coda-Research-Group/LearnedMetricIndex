@@ -86,20 +86,12 @@ class LMI(ChromaIndex):
                   constraint_weight=0.0,
                   num_threads=-1,
                   filter=None,
-                  filter_restrictiveness=1.0,
                   use_bruteforce=False,
                   *args, **kwargs)\
             -> (np.ndarray, np.ndarray, np.ndarray):
 
         data_converted = np.array(data)
         data_converted = preprocessing.normalize(data_converted)
-
-        # TODO: move this to local_lmi now the filter related calculations are convoluted across files
-        if filter is not None:
-            print("Filter restrictiveness: ", filter_restrictiveness)
-            if constraint_weight < 0.0:
-                constraint_weight = 1 - filter_restrictiveness
-            print("constraint_weight", constraint_weight)
 
         nns, dists, bucket_order = None, None, None
 
@@ -132,9 +124,6 @@ class LMI(ChromaIndex):
             )
 
         return nns, dists, bucket_order
-
-    def brute_force_knn_query(self, data, k=1, n_buckets=1, constraint_weight=0.0, num_threads=-1, filter=None, *args, **kwargs):
-        pass
 
     def get_items(self, ids=None):
         return self._dataset

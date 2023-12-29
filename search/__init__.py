@@ -42,7 +42,7 @@ class ChromaIndex(ABC):
         pass
 
     @abstractmethod
-    def knn_query(self, data, k=1, num_threads=-1, filter=None, filter_restrictiveness=1.0, use_bruteforce=False, *args, **kwargs):
+    def knn_query(self, data, k=1, num_threads=-1, filter=None, use_bruteforce=False, *args, **kwargs):
         pass
 
     @abstractmethod
