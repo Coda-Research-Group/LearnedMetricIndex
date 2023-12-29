@@ -59,6 +59,7 @@ class LMI(ChromaIndex):
 
     def build_index(self):
         # normalize dataset
+        self._dataset = np.array(self._dataset)
         self._dataset = preprocessing.normalize(self._dataset)
 
         # Convert dataset to pandas and shift its index by one if it starts at zero
@@ -115,7 +116,7 @@ class LMI(ChromaIndex):
             )
             nns = original_indices[indices]
             dists = 1 - similarity
-            bucket_order = np.array([[-1]])
+            bucket_order = np.array([[[-1]]])
         else:
             dists, nns, bucket_order, measured_time = self._internal_index.search(
                 data_navigation=self._dataset,
@@ -126,7 +127,7 @@ class LMI(ChromaIndex):
                 n_categories=self._n_categories,
                 n_buckets=n_buckets,
                 k=k,
-                attribute_filter=filter,
+                attribute_filter=np.array([filter]),
                 constraint_weight=constraint_weight
             )
 
