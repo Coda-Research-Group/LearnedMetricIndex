@@ -24,6 +24,7 @@ class LMI(ChromaIndex):
 
     def add_items(self, data: List[Union[Sequence[float], Sequence[int]]], ids=None, num_threads=-1,
                   replace_deleted=False):
+        # TODO: this needs to be parallelized since it is the slowest part of the process
         self._dataset.extend(data)
 
     def init_index(self,
@@ -96,19 +97,25 @@ class LMI(ChromaIndex):
         nns, dists, bucket_order = None, None, None
 
         # If filter is too restrictive, brute force the answer
-        if use_bruteforce:
-            original_indices = self._dataset.loc[filter].index.to_numpy()
-            dataset_filtered = self._dataset.loc[filter].to_numpy()
+        if use_bruteforce and filter is not None:
+            if len(filter) == 0:
+                # case of empty filter
+                nns = np.array([[]])
+                dists = np.array([[]])
+                bucket_order = np.array([[[-1]]])
+            else:
+                original_indices = self._dataset.loc[filter].index.to_numpy()
+                dataset_filtered = self._dataset.loc[filter].to_numpy()
 
-            similarity, indices = faiss.knn(
-                data_converted,
-                dataset_filtered,
-                k,
-                metric=faiss.METRIC_INNER_PRODUCT,
-            )
-            nns = original_indices[indices]
-            dists = 1 - similarity
-            bucket_order = np.array([[[-1]]])
+                similarity, indices = faiss.knn(
+                    data_converted,
+                    dataset_filtered,
+                    k,
+                    metric=faiss.METRIC_INNER_PRODUCT,
+                )
+                nns = original_indices[indices]
+                dists = 1 - similarity
+                bucket_order = np.array([[[-1]]])
         else:
             dists, nns, bucket_order, measured_time = self._internal_index.search(
                 data_navigation=self._dataset,

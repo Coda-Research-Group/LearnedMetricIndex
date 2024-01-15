@@ -204,3 +204,11 @@ def get_children_probabilities(path_children: List[List[Tuple[int, int]]],
         children_probabilities.append(selected_values)
 
     return np.array(children_probabilities)
+
+
+def map_range(value, original_range, new_range):
+    (original_min, original_max) = original_range
+    (new_min, new_max) = new_range
+
+    new_value = (value - original_min) / (original_max - original_min) * (new_max - new_min) + new_min
+    return new_value

@@ -13,8 +13,7 @@ from chromadb.li_index.search.li.Logger import Logger
 from chromadb.li_index.search.li.model import NeuralNetwork, data_X_to_torch
 from chromadb.li_index.search.li.PriorityQueue import EMPTY_VALUE, PriorityQueue
 from chromadb.li_index.search.li.utils import filter_path_idxs, log_runtime
-from chromadb.li_index.search.attribtue_filtering.default_filtering import (attribute_filtering,
-                                                                            precompute_bucket_ids,
+from chromadb.li_index.search.attribtue_filtering.default_filtering import (precompute_bucket_ids,
                                                                             compute_ratios_for_attribute_filters,
                                                                             combine_probabilities,
                                                                             path_children_from_categories,
@@ -102,19 +101,9 @@ class LearnedIndex(Logger):
 
         self.logger.debug("Precomputing bucket order")
 
-        # CONSTRAINT MODIFICATION START
-        # TODO: this is not ideal since we are computing always full bucket order
-        # TODO: this is quick fix, find other solution that increase n_buckets in _precompute_bucket_order based on attribute_filter
-        # TODO: total buckets can be computed during build time
-        n_buckets_precompute = n_buckets
-        if attribute_filter is not None:
-            total_buckets = np.prod(n_categories)
-            n_buckets_precompute = total_buckets
-        # CONSTRAINT MODIFICATION END
-
         bucket_order, measured_time["inference"] = self._precompute_bucket_order(
             queries_navigation=queries_navigation,
-            n_buckets=n_buckets_precompute,
+            n_buckets=n_buckets,
             n_categories=n_categories,
             # CONSTRAINT MODIFICATION START
             data_prediction=data_prediction,
@@ -129,11 +118,8 @@ class LearnedIndex(Logger):
                 :, (level_to_search - 1)
             ]
 
-        # CONSTRAINT MODIFICATION START
-        bucket_order_idx = 0
         # Search in the `n_buckets` most similar buckets
-        while bucket_order_idx < n_buckets:
-        # CONSTRAINT MODIFICATION END
+        for bucket_order_idx in range(n_buckets):
             self.logger.debug(
                 f"Searching in bucket {bucket_order_idx + 1} out of {n_buckets}"
             )
@@ -178,19 +164,8 @@ class LearnedIndex(Logger):
                     == (queries_search.shape[0], k)
                 )
 
-            # CONSTRAINT MODIFICATION START
-            if attribute_filter is not None:
-                # If due to filter we do not get k results for some query increase number of searched buckets
-                # TODO: this may not be efficient if we perform search for multiple queries at once
-                if np.any(anns_final == 0) and n_buckets < total_buckets:
-                    n_buckets += 1
-
-            bucket_order_idx += 1
-            # CONSTRAINT MODIFICATION END
-
             self.logger.debug(f"Sorted the results in: {time.time() - t}")
 
-        print("Number of buckets searched: ", n_buckets)
 
         assert dists_final is not None
         assert anns_final is not None
@@ -206,7 +181,7 @@ class LearnedIndex(Logger):
 
         return dists_final, anns_final, bucket_order, measured_time
 
-    @log_runtime(INFO, "Precomputed bucket order time: {}")
+    # @log_runtime(INFO, "Precomputed bucket order time: {}")
     def _precompute_bucket_order(
         self,
         queries_navigation: npt.NDArray[np.float32],
