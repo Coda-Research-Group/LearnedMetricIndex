@@ -55,7 +55,8 @@ class LearnedIndex(Logger):
         k: int = 10,
         # CONSTRAINT MODIFICATION START
         attribute_filter: Optional[npt.NDArray[np.uint32]] = None,
-        constraint_weight=0.0
+        constraint_weight=0.0,
+        search_until_bucket_not_empty=False,
         # CONSTRAINT MODIFICATION END
     ) -> Tuple[npt.NDArray, npt.NDArray[np.uint32], npt.NDArray, Dict[str, float]]:
         """Searches for `k` nearest neighbors for each query in `queries`.
@@ -101,9 +102,16 @@ class LearnedIndex(Logger):
 
         self.logger.debug("Precomputing bucket order")
 
+        # CONSTRAINT MODIFICATION START
+        # TODO: change n_buckets_precompute to be hyperparameter
+        n_buckets_precompute = n_buckets
+        if attribute_filter is not None and search_until_bucket_not_empty:
+            n_buckets_precompute = np.prod(n_categories)
+        # CONSTRAINT MODIFICATION END
+
         bucket_order, measured_time["inference"] = self._precompute_bucket_order(
             queries_navigation=queries_navigation,
-            n_buckets=n_buckets,
+            n_buckets=n_buckets_precompute,
             n_categories=n_categories,
             # CONSTRAINT MODIFICATION START
             data_prediction=data_prediction,
@@ -118,8 +126,11 @@ class LearnedIndex(Logger):
                 :, (level_to_search - 1)
             ]
 
+        # CONSTRAINT MODIFICATION START
+        bucket_order_idx = 0
         # Search in the `n_buckets` most similar buckets
-        for bucket_order_idx in range(n_buckets):
+        while bucket_order_idx < n_buckets:
+        # CONSTRAINT MODIFICATION END
             self.logger.debug(
                 f"Searching in bucket {bucket_order_idx + 1} out of {n_buckets}"
             )
@@ -163,6 +174,16 @@ class LearnedIndex(Logger):
                     == dists_final.shape
                     == (queries_search.shape[0], k)
                 )
+
+            # CONSTRAINT MODIFICATION START
+            if attribute_filter is not None:
+                # If due to filter we do not get k results for some query increase number of searched buckets
+                # TODO: this may not be efficient if we perform search for multiple queries at once
+                if np.any(anns_final == 0) and n_buckets < n_buckets_precompute:
+                    n_buckets += 1
+
+            bucket_order_idx += 1
+            # CONSTRAINT MODIFICATION END
 
             self.logger.debug(f"Sorted the results in: {time.time() - t}")
 

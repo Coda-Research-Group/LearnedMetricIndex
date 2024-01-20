@@ -88,6 +88,7 @@ class LMI(ChromaIndex):
                   num_threads=-1,
                   filter=None,
                   use_bruteforce=False,
+                  search_until_bucket_not_empty=False,
                   *args, **kwargs)\
             -> (np.ndarray, np.ndarray, np.ndarray):
 
@@ -127,7 +128,8 @@ class LMI(ChromaIndex):
                 n_buckets=n_buckets,
                 k=k,
                 attribute_filter=np.array([filter]),
-                constraint_weight=constraint_weight
+                constraint_weight=constraint_weight,
+                search_until_bucket_not_empty=search_until_bucket_not_empty,
             )
 
         return nns, dists, bucket_order
