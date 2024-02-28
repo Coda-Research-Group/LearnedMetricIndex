@@ -126,7 +126,7 @@ class LMI(ChromaIndex):
                 n_categories=self._n_categories,
                 n_buckets=n_buckets,
                 k=k,
-                attribute_filter=np.array([filter]),
+                attribute_filter=np.array([filter]) if filter is not None else None,
                 constraint_weight=constraint_weight,
                 search_until_bucket_not_empty=search_until_bucket_not_empty,
             )
