@@ -256,7 +256,7 @@ class LearnedIndex(Logger):
         model_weight = 1 - constraint_weight
         if n_levels == 1:
             # CONSTRAINT MODIFICATION START
-            if constraint_weight > 0:
+            if constraint_weight > 0 and attribute_filter is not None:
                 # Shift back by -1, so we can access the correct index in data_prediction
                 shifted_attribute_filters = attribute_filter - 1
 
@@ -301,7 +301,7 @@ class LearnedIndex(Logger):
         bucket_ids = None
         constraint_bucket_ratios = None
         constraint_tree_ratios = None
-        if constraint_weight > 0:
+        if constraint_weight > 0 and attribute_filter is not None:
             bucket_ids = precompute_bucket_ids(n_categories)
             constraint_bucket_ratios = compute_ratios_for_attribute_filters(data_prediction, attribute_filter, n_categories)
             constraint_tree_ratios = combine_probabilities(constraint_bucket_ratios)
@@ -318,7 +318,7 @@ class LearnedIndex(Logger):
 
             # CONSTRAINT MODIFICATION START
             final_l1_prob = pred_l1_prob[:, l1_idx]
-            if constraint_weight > 0:
+            if constraint_weight > 0 and attribute_filter is not None:
                 tuple_l1_paths = [tuple(row) for row in l1_paths]
                 # Selecting values from the dictionaries based on the tuple keys
                 constraint_l1_propb = np.array([constraint_tree_ratios[i][tuple_l1_paths[i]] for i in range(len(tuple_l1_paths))])
@@ -338,7 +338,7 @@ class LearnedIndex(Logger):
 
             inference_t = self._visit_internal_nodes(
                 queries_navigation, query_idxs, pq, path_to_visit,
-                n_levels, constraint_weight, constraint_tree_ratios
+                n_levels, constraint_weight, constraint_tree_ratios, attribute_filter
             )
             self._visit_buckets(
                 query_idxs,
@@ -361,7 +361,8 @@ class LearnedIndex(Logger):
         path_to_visit: npt.NDArray[np.int32],
         n_levels: int,
         constraint_weight: float = 0.0,
-        constraint_tree_ratios: Optional[List[Dict[Tuple[int, ...], float]]] = None
+        constraint_tree_ratios: Optional[List[Dict[Tuple[int, ...], float]]] = None,
+        attribute_filter: Optional[npt.NDArray[np.uint32]] = None,
     ) -> float:
         """
         Visits the internal nodes specified by `paths`.
@@ -384,7 +385,7 @@ class LearnedIndex(Logger):
             )
 
             # CONSTRAINT MODIFICATION START
-            if constraint_weight > 0:
+            if constraint_weight > 0 and attribute_filter is not None:
                 path_children = path_children_from_categories(path, categories)
                 constraint_probabilities = get_children_probabilities(path_children, constraint_tree_ratios)
                 probabilities = (1 - constraint_weight) * probabilities + constraint_weight * constraint_probabilities
