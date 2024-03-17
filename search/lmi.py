@@ -134,7 +134,7 @@ class LMI(ChromaIndex):
         return nns, dists, bucket_order
 
     def get_items(self, ids=None):
-        return self._dataset
+        return self._dataset.loc[ids].values
 
     def get_current_count(self):
         "Return size of the dataset that LMI currently operates on."
