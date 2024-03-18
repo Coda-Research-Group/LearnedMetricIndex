@@ -64,7 +64,8 @@ python3 eval/plot.py res.csv
 - ~6h of runtime (waries depending on the hardware)
 
 # LMI in action
-🌐 [**Similarity search in 214M protein structures (AlphaFold DB)**](https://alphafind.fi.muni.cz/search)
+- 🌐 [**Similarity search in 1M images**](https://web.lmi.dyn.cloud.e-infra.cz/images)
+- 🌐 [**Similarity search in protein structures**](https://staging.proteins.dyn.cloud.e-infra.cz/protein-search)
 
 # Publications
 
@@ -82,15 +83,8 @@ python3 eval/plot.py res.csv
 - [**Mendeley data**](https://data.mendeley.com/datasets/8wp73zxr47/12)
 > T. Slanináková, M. Antol, J. Ol'ha, V. Kaňa, V. Dohnal, S. Ladra, M. A. Martinez-Prieto: [Reproducible experiments with Learned Metric Index Framework](https://www.sciencedirect.com/science/article/pii/S0306437923000911). Information Systems, Volume 118, September 2023, 102255 (2023)
 
-**"LMI in a large (214M) protein database" (2024):**
-- [**Web**](https://alphafind.fi.muni.cz/search)
-- [**Repository**](https://github.com/Coda-Research-Group/AlphaFind)
-- [**Data**](https://data.narodni-repozitar.cz/general/datasets/d35zf-1ja47)
-> PROCHÁZKA, David, Terézia SLANINÁKOVÁ, Jaroslav OĽHA, Adrián ROŠINEC, Katarína GREŠOVÁ, Miriama JÁNOŠOVÁ, Jakub ČILLÍK, Jana PORUBSKÁ, Radka SVOBODOVÁ, Vlastislav DOHNAL a Matej ANTOL.: [AlphaFind: Discover structure similarity across the entire known proteome](https://www.biorxiv.org/content/10.1101/2024.02.15.580465v1). BioRxiv (pre-print version)
-
 
 ## Team
-🔎[**Complex data analysis research group**](https://disa.fi.muni.cz/complex-data-analysis)
 - [Terézia Slanináková](https://github.com/TerkaSlan), Masaryk University
 - [David Procházka](https://github.com/ProchazkaDavid), Masaryk University
 - [Jaroslav Oľha](https://github.com/JaroOlha), Masaryk University

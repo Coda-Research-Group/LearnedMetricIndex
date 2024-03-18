@@ -105,6 +105,65 @@ class LearnedIndexBuilder(Logger):
             time.time() - s,
             root_cluster_t + internal_cluster_t,
         )
+    
+    def insert(self, data) -> Tuple[LearnedIndex, npt.NDArray[np.int64], int, float, float]:
+        """
+        Inserts data into the index.
+
+        Parameters
+        ----------
+        data : pd.DataFrame
+            Data to build the index on.
+        config : BuildConfiguration
+            Configuration for the training.
+
+        Returns
+        -------
+        Tuple[npt.NDArray[np.int64], int, float, float]
+            An array of shape (data.shape[0], len(config.n_levels)) with predicted paths for each data point,
+            number of buckets, time it took to build the index, time it took to cluster the data.
+        """
+        s = time.time()
+
+        n_levels = self.config.n_levels
+
+        # Where should the training data be placed with respect to each level
+        data_prediction: npt.NDArray[np.int64] = np.full(
+            (data.shape[0], n_levels), fill_value=EMPTY_VALUE, dtype=np.int64
+        )
+        # Extend the data with the new data to be inserted
+        data = data.reset_index(drop=True)
+        data.index = data.index + 1
+        self.data = pd.concat([self.data, data], ignore_index=True)
+
+        self.logger.debug("Predicting the root model.")
+        data_prediction[:, 0] = self.root_model.predict(data_X_to_torch(data))
+
+        if n_levels == 1:
+
+            return (
+                #self._create_index(),
+                data_prediction,
+                len(self.bucket_paths),
+                time.time() - s,
+            )
+
+        self.logger.debug(f"Predicting {self.config.n_categories[:-1]} internal models.")
+        s_internal = time.time()
+        self._insert_internal_models(
+            data,
+            data_prediction,
+            self.config,
+        )
+        self.logger.debug(
+            f"Trained {self.config.n_categories[:-1]} internal models in {time.time()-s_internal:.2f}s."
+        )
+
+        return (
+            data_prediction,
+            len(self.bucket_paths),
+            time.time() - s
+        )
 
     def _create_index(self) -> LearnedIndex:
         """Creates the index from the trained models."""
@@ -278,6 +337,60 @@ class LearnedIndexBuilder(Logger):
                         self.bucket_paths.append(path[:-1] + (bucket_index,))
 
         return overall_cluster_t
+
+    def _insert_internal_models(
+        self,
+        data: pd.DataFrame,
+        data_prediction: npt.NDArray[np.int64],
+        config: BuildConfiguration,
+    ):
+        """
+        Predicts the data to be inserted on internal models.
+
+        ! The `data_prediction` array is modified in-place.
+
+        Parameters
+        ----------
+        data : pd.DataFrame
+            Data to train the models on.
+        data_prediction : npt.NDArray[np.int64]
+            Predicted paths for each data point.
+        config : BuildConfiguration
+            Configuration for the training.
+
+        Returns
+        -------
+        float
+            Time it took to cluster the data.
+        """
+        assert (
+            self.root_model is not None
+        ), "The root model is not trained, call `_train_root_model` first."
+
+        for level in range(1, config.n_levels):
+            internal_node_paths = self._generate_internal_node_paths(
+                level, config.n_levels, config.n_categories
+            )
+            self.logger.debug(f"Predicting level {level}.")
+
+            for path in tqdm(internal_node_paths):
+                self.logger.debug(f"Predicting model on path {path}.")
+
+                data_idxs = filter_path_idxs(data_prediction, path)
+                assert (
+                    data_idxs.shape[0] != 0
+                ), "There are no data points associated with the given path."
+
+                # +1 as the data is indexed from 1
+                data_prediction_per_path = data.loc[data_idxs + 1]
+
+                # The subset needs to be reindexed; otherwise, the object accesses are invalid.
+                original_pd_indices = data_prediction_per_path.index.values
+                predictions = self.internal_models[path].predict(data_X_to_torch(data_prediction_per_path))
+
+                # original_pd_indices-1 as data is indexed from 1
+                # level as we are predicting the next level but the indexing is 0-based
+                data_prediction[original_pd_indices - 1, level] = predictions
 
     def _cluster(
         self,

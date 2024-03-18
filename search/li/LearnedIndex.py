@@ -106,7 +106,7 @@ class LearnedIndex(Logger):
         # Search in the `n_buckets` most similar buckets
         for bucket_order_idx in range(n_buckets):
             self.logger.debug(
-                f"Searching in bucket {bucket_order_idx + 1} out of {n_buckets}"
+                f"Searching in bucket {bucket_order_idx + 1} out of {n_buckets} | bucket order={bucket_order[:, bucket_order_idx, :]}"
             )
             (dists, anns, t_all, t_seq_search, t_sort) = self._search_single_bucket(
                 data_navigation=data_navigation,
@@ -348,6 +348,8 @@ class LearnedIndex(Logger):
         t_sort = 0.0
 
         for path, g in tqdm(data_navigation.groupby(possible_bucket_paths)):
+            #self.logger.info(f'path: {path}, g: {g}')
+
             bucket_obj_indexes = g.index
 
             relevant_query_idxs = filter_path_idxs(bucket_path, path)
@@ -355,8 +357,9 @@ class LearnedIndex(Logger):
             if bucket_obj_indexes.shape[0] != 0 and relevant_query_idxs.shape[0] != 0:
                 queries_for_this_bucket = queries_search[relevant_query_idxs]
                 data_in_this_bucket = data_search.loc[bucket_obj_indexes].to_numpy()
-
+                #self.logger.info(f"queries_for_this_bucket: {queries_for_this_bucket}")
                 s = time.time()
+
                 similarity, indices = faiss.knn(
                     queries_for_this_bucket,
                     data_in_this_bucket,

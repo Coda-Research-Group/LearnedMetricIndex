@@ -7,6 +7,7 @@ on:
       # Push events on main and dev branch
       - main
       - dev
+      - dynamic-lmi
     # Sequence of patterns matched against refs/tags
     tags: '*'
 
@@ -113,10 +114,5 @@ jobs:
           conda install matplotlib pandas scikit-learn
           pip install h5py setuptools tqdm faiss-cpu
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - name: Run learned index
-        shell: bash -el {0}
-        run: |
-          conda activate env
-          pip install --editable .
-          python3 search/search.py
-          python3 eval/eval.py
+      - name: Run tests
+        run: pytest
