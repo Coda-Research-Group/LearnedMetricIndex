@@ -71,8 +71,8 @@ jobs:
         run: |
           conda create -n env python=3.8
           conda activate env
-          conda install matplotlib pandas scikit-learn pytest
-          pip install h5py setuptools tqdm faiss-cpu
+          conda install matplotlib pandas scikit-learn
+          pip install h5py setuptools tqdm faiss-cpu pytest
           pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: Run tests
         run: pytest
