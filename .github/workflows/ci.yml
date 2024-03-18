@@ -74,6 +74,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install matplotlib pandas scikit-learn h5py setuptools tqdm faiss-cpu pytest
           pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e .
 
       - name: Check installed packages
         run: pip list
