@@ -6,6 +6,9 @@ from li.LearnedIndexBuilder import LearnedIndexBuilder
 
 from sklearn import preprocessing
 import pandas as pd
+import numpy as np
+import h5py
+import os
 
 def get_data(data_part, **config):
     return np.array(

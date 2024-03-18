@@ -79,4 +79,4 @@ jobs:
         run: pip list
 
       - name: Run tests
-        run: pytest
+        run: pytest search/tests
