@@ -1,5 +1,4 @@
 import pytest
-from search import download, prepare
 from li.BuildConfiguration import BuildConfiguration
 from li.clustering import algorithms
 from li.LearnedIndexBuilder import LearnedIndexBuilder
@@ -23,6 +22,24 @@ def get_data(data_part, **config):
         )[config['emb']]
     )
 
+def download(src, dst):
+    if not os.path.exists(dst):
+        os.makedirs(Path(dst).parent, exist_ok=True)
+        LOG.info("downloading %s -> %s..." % (src, dst))
+        urlretrieve(src, dst)
+
+
+def prepare(kind, size):
+    url = "https://sisap-23-challenge.s3.amazonaws.com/SISAP23-Challenge"
+    task = {
+        "query": f"{url}/public-queries-10k-{kind}.h5",
+        "dataset": f"{url}/laion2B-en-{kind}-n={size}.h5",
+    }
+
+    for version, url in task.items():
+        target_path = os.path.join("data", kind, size, f"{version}.h5")
+        download(url, target_path)
+        assert os.path.exists(target_path), f"Failed to download {url}"
 
 # Fixture for common setup tasks
 @pytest.fixture(scope="session")
@@ -46,6 +63,7 @@ def setup():
     if config['preprocess']:
         data = preprocessing.normalize(data)
         queries = preprocessing.normalize(queries)
+    data = pd.DataFrame(data)
     yield data, queries
 
 # Example tests using the setup fixture
@@ -73,14 +91,14 @@ def test_one_level(setup):
     first_build_data = data.iloc[:sample]
     builder = LearnedIndexBuilder(first_build_data, build_config)
     li, data_prediction, n_buckets_in_index, build_t, cluster_t = builder.build()
-    assert data_prediction.shape == (sample, 1), "Data prediction shape is not correct: " + str(data_prediction.shape)
+    assert data_prediction.shape == (sample, len(n_categories)), "Data prediction shape is not correct: " + str(data_prediction.shape)
     assert builder.data.shape == (sample, dimensionality), "Data shape is not correct: " + str(builder.data.shape)
     
     insert_data = data.iloc[sample:sample+increment]
     data_prediction_2, n_buckets_in_index_2, insert_t = builder.insert(insert_data)
-    assert data_prediction_2.shape == (increment, 1), "Data prediction shape is not correct: " + str(data_prediction.shape)
-    # 32
-    assert builder.data.shape == (sample+increment, dimensionality+len(n_categories)), "Data shape is not correct: " + str(builder.data.shape)
+    assert data_prediction_2.shape == (increment, len(n_categories)), "Data prediction shape is not correct: " + str(data_prediction.shape)
+
+    assert builder.data.shape == (sample+increment, dimensionality), "Data shape is not correct: " + str(builder.data.shape)
 
     data_prediction_all = np.vstack((data_prediction, data_prediction_2))
 
