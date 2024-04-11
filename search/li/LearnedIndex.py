@@ -1,7 +1,7 @@
 import time
 from collections import defaultdict
 from logging import DEBUG, INFO
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 import faiss
 import numpy as np
@@ -13,6 +13,7 @@ from li.Logger import Logger
 from li.model import NeuralNetwork, data_X_to_torch
 from li.PriorityQueue import EMPTY_VALUE, PriorityQueue
 from li.utils import filter_path_idxs, log_runtime
+from li.Bucket import Bucket, NaiveBucket, IVFBucket
 from tqdm import tqdm
 
 torch.manual_seed(2023)
@@ -20,6 +21,11 @@ np.random.seed(2023)
 
 
 class LearnedIndex(Logger):
+    root_model: NeuralNetwork
+    internal_models: Dict[Tuple, NeuralNetwork]
+    bucket_paths: List[Tuple]
+    bucket_models: Optional[Dict[Tuple, Bucket]]
+    
     def __init__(
         self,
         root_model: NeuralNetwork,
@@ -37,6 +43,203 @@ class LearnedIndex(Logger):
 
         self.bucket_paths = bucket_paths
         """List of paths to the buckets."""
+
+        self.bucket_models = None
+
+    def _create_buckets(
+        self,
+        data_navigation: pd.DataFrame,
+        data_search: pd.DataFrame,
+        data_prediction: pd.DataFrame,
+        n_levels: int,
+        bucket_type_name: str,
+        mode: str,
+        **kwargs
+    ) -> float:
+        bucket_type = None
+        if bucket_type_name == "naive":
+            bucket_type = NaiveBucket
+        elif bucket_type_name == "IVF":
+            bucket_type = IVFBucket
+        assert bucket_type is not None
+
+        for level_to_search in range(1, n_levels + 1):
+            data_navigation[f"category_L{level_to_search}"] = data_prediction[
+                :, (level_to_search - 1)
+            ]
+
+        possible_bucket_paths = [
+            f"category_L{level_to_search}" for level_to_search in range(1, n_levels + 1)
+        ]
+
+        bucket_models = {} if mode in ["build", "train"] else self.bucket_models
+        assert bucket_models is not None
+
+        total_time = 0.
+
+        for path, g in data_navigation.groupby(possible_bucket_paths):
+            bucket_obj_indexes = g.index.to_numpy()
+            data_for_this_bucket = data_search.loc[bucket_obj_indexes].to_numpy()
+
+            if mode == "build":
+                bucket = bucket_type()
+                total_time += bucket.build(data_for_this_bucket, bucket_obj_indexes, **kwargs)
+                bucket_models[path] = bucket
+
+            elif mode == "train":
+                bucket = bucket_type()
+                total_time += bucket.train(data_for_this_bucket, **kwargs)
+                bucket_models[path] = bucket
+
+            elif mode == "add":
+                bucket = bucket_models[path]
+                total_time += bucket.add(data_for_this_bucket, bucket_obj_indexes)
+
+            else:
+                assert False
+
+        self.bucket_models = bucket_models
+        return total_time
+
+    @log_runtime(INFO, "Built buckets in: {}")
+    def build_buckets(
+        self,
+        data_navigation: pd.DataFrame,
+        data_search: pd.DataFrame,
+        data_prediction: pd.DataFrame,
+        n_levels: int,
+        bucket_type_name: str = "naive",
+        **kwargs
+    ) -> float:
+        return self._create_buckets(data_navigation, data_search, data_prediction, n_levels, bucket_type_name, "build", **kwargs)
+
+    @log_runtime(INFO, "Trained buckets in: {}")
+    def train_buckets(
+        self,
+        data_navigation: pd.DataFrame,
+        data_search: pd.DataFrame,
+        data_prediction: pd.DataFrame,
+        n_levels: int,
+        bucket_type_name: str = "naive",
+        **kwargs
+    ) -> float:
+        return self._create_buckets(data_navigation, data_search, data_prediction, n_levels, bucket_type_name, "train", **kwargs)
+
+    @log_runtime(INFO, "Added to buckets in: {}")
+    def add_to_buckets(
+        self,
+        data_navigation: pd.DataFrame,
+        data_search: pd.DataFrame,
+        data_prediction: pd.DataFrame,
+        n_levels: int,
+        bucket_type_name: str = "naive",
+        **kwargs
+    ) -> float:
+        return self._create_buckets(data_navigation, data_search, data_prediction, n_levels, bucket_type_name, "add", **kwargs)
+
+    def search_with_buckets(
+        self,
+        queries_navigation: npt.NDArray[np.float32],
+        queries_search: npt.NDArray[np.float32],
+        n_categories: List[int],
+        n_buckets: int = 1,
+        k: int = 10,
+        **kwargs
+    ) -> Tuple[npt.NDArray, npt.NDArray[np.uint32], Dict[str, float]]:
+        """Searches for `k` nearest neighbors for each query in `queries`.
+        Buckets must have previously been build with `build_buckets`
+
+        Implementation details:
+        - The search is done in two steps:
+            1. The order in which the queries visit the buckets is precomputed.
+            2. The queries are then searched in the `n_buckets` most similar buckets.
+
+        Parameters
+        ----------
+        queries_navigation : npt.NDArray[np.float32]
+            Queries used for navigation.
+        queries_search : npt.NDArray[np.float32]
+            Queries used for the sequential search.
+        n_categories : List[int]
+            Number of categories for each level of the index.
+        n_buckets : int, optional
+            Number of most similar buckets to search in, by default 1
+        k : int, optional
+            Number of nearest neighbors to search for, by default 10
+
+        Returns
+        -------
+        Tuple[npt.NDArray, npt.NDArray[np.uint32], Dict[str, float]]
+            Array of shape (queries_search.shape[0], k) with distances to nearest neighbors for each query,
+            array of shape (queries_search.shape[0], k) with nearest neighbors for each query,
+            dictionary with measured times.
+        """
+        assert self.bucket_models is not None
+
+        measured_time = defaultdict(float)
+
+        s = time.time()
+
+        anns_final = None
+        dists_final = None
+
+        self.logger.debug("Precomputing bucket order")
+        bucket_order, measured_time["inference"] = self._precompute_bucket_order(
+            queries_navigation=queries_navigation,
+            n_buckets=n_buckets,
+            n_categories=n_categories,
+        )
+
+        # Search in the `n_buckets` most similar buckets
+        for bucket_order_idx in range(n_buckets):
+            self.logger.debug(
+                f"Searching in bucket {bucket_order_idx + 1} out of {n_buckets}"
+            )
+            (dists, anns, t_all, t_seq_search, t_sort, n_dis) = self._search_single_bucket_built(
+                queries_search=queries_search,
+                bucket_path=bucket_order[:, bucket_order_idx, :],
+                k=k,
+                **kwargs
+            )
+
+            measured_time["search_within_buckets"] += t_all
+            measured_time["seq_search"] += t_seq_search
+            measured_time["sort"] += t_sort
+            measured_time["distance_computations"] += n_dis
+
+            self.logger.debug("Sorting the results")
+            t = time.time()
+            if anns_final is None:
+                anns_final = anns
+                dists_final = dists
+            else:
+                # stacks the results from the previous sorted anns and dists
+                # *_final arrays now have shape (queries.shape[0], k*2)
+                anns_final = np.hstack((anns_final, anns))
+                dists_final = np.hstack((dists_final, dists))
+                # gets the sorted indices of the stacked dists
+                idx_sorted = dists_final.argsort(kind="stable", axis=1)[:, :k]
+                # indexes the final arrays with the sorted indices
+                # *_final arrays now have shape (queries.shape[0], k)
+                idx = np.ogrid[tuple(map(slice, dists_final.shape))]
+                idx[1] = idx_sorted
+                dists_final = dists_final[tuple(idx)]
+                anns_final = anns_final[tuple(idx)]
+
+                assert (
+                    anns_final.shape
+                    == dists_final.shape
+                    == (queries_search.shape[0], k)
+                )
+            self.logger.debug(f"Sorted the results in: {time.time() - t}")
+
+        assert dists_final is not None
+        assert anns_final is not None
+
+        measured_time["search"] = time.time() - s
+
+        return dists_final, anns_final, measured_time
+
 
     def search(
         self,
@@ -108,7 +311,7 @@ class LearnedIndex(Logger):
             self.logger.debug(
                 f"Searching in bucket {bucket_order_idx + 1} out of {n_buckets}"
             )
-            (dists, anns, t_all, t_seq_search, t_sort) = self._search_single_bucket(
+            (dists, anns, t_all, t_seq_search, t_sort, n_dis) = self._search_single_bucket(
                 data_navigation=data_navigation,
                 data_search=data_search,
                 queries_search=queries_search,
@@ -119,6 +322,7 @@ class LearnedIndex(Logger):
             measured_time["search_within_buckets"] += t_all
             measured_time["seq_search"] += t_seq_search
             measured_time["sort"] += t_sort
+            measured_time["distance_computations"] += n_dis
 
             self.logger.debug("Sorting the results")
             t = time.time()
@@ -324,7 +528,7 @@ class LearnedIndex(Logger):
             )
             bucket_order_length[query_idxs] += 1
 
-    @log_runtime(DEBUG, "Searched the bucket in: {}")
+    @log_runtime(DEBUG, "Searched the buckets in: {}")
     def _search_single_bucket(
         self,
         data_navigation: pd.DataFrame,
@@ -333,7 +537,7 @@ class LearnedIndex(Logger):
         bucket_path: npt.NDArray[np.int32],
         k: int = 10,
         n_levels: int = 1,
-    ) -> Tuple[npt.NDArray, npt.NDArray[np.uint32], float, float, float]:
+    ) -> Tuple[npt.NDArray, npt.NDArray[np.uint32], float, float, float, int]:
         s_all = time.time()
 
         n_queries = queries_search.shape[0]
@@ -346,6 +550,7 @@ class LearnedIndex(Logger):
 
         t_seq_search = 0.0
         t_sort = 0.0
+        n_dis_total = 0
 
         for path, g in tqdm(data_navigation.groupby(possible_bucket_paths)):
             bucket_obj_indexes = g.index
@@ -367,7 +572,46 @@ class LearnedIndex(Logger):
 
                 distances = 1 - similarity
 
+                n_dis_total += len(queries_for_this_bucket) * len(data_in_this_bucket)
+
                 nns[relevant_query_idxs] = bucket_obj_indexes.to_numpy()[indices]
                 dists[relevant_query_idxs] = distances
 
-        return dists, nns, time.time() - s_all, t_seq_search, t_sort
+        return dists, nns, time.time() - s_all, t_seq_search, t_sort, n_dis_total
+
+    @log_runtime(DEBUG, "Searched the buckets in: {}")
+    def _search_single_bucket_built(
+        self,
+        queries_search: npt.NDArray[np.float32],
+        bucket_path: npt.NDArray[np.int32],
+        k: int = 10,
+        **kwargs
+    ) -> Tuple[npt.NDArray, npt.NDArray[np.uint32], float, float, float, int]:
+        assert self.bucket_models is not None
+        s_all = time.time()
+
+        n_queries = queries_search.shape[0]
+        nns = np.zeros((n_queries, k), dtype=np.uint32)
+        dists = np.full((n_queries, k), fill_value=float("inf"), dtype=float)
+
+        t_seq_search = 0.0
+        t_sort = 0.0
+        n_dis_total = 0
+
+        for path, bucket in tqdm(self.bucket_models.items()):
+            relevant_query_idxs = filter_path_idxs(bucket_path, path)
+
+            if relevant_query_idxs.shape[0] == 0:
+                continue
+
+            queries_for_this_bucket = queries_search[relevant_query_idxs]
+
+            indices, distances, t_search, n_dis = bucket.search(queries_for_this_bucket, k, **kwargs)
+            t_seq_search += t_search
+            n_dis_total += n_dis
+
+            # return indexes to original dataset
+            nns[relevant_query_idxs] = bucket.original_idxs[indices]
+            dists[relevant_query_idxs] = distances
+
+        return dists, nns, time.time() - s_all, t_seq_search, t_sort, n_dis_total
