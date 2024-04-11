@@ -13,7 +13,7 @@ from li.Logger import Logger
 from li.model import NeuralNetwork, data_X_to_torch
 from li.PriorityQueue import EMPTY_VALUE, PriorityQueue
 from li.utils import filter_path_idxs, log_runtime
-from li.Bucket import Bucket, NaiveBucket, IVFBucket
+from li.Bucket import Bucket, NaiveBucket, IVFBucket, IVFBucketFaiss
 from tqdm import tqdm
 
 torch.manual_seed(2023)
@@ -61,6 +61,8 @@ class LearnedIndex(Logger):
             bucket_type = NaiveBucket
         elif bucket_type_name == "IVF":
             bucket_type = IVFBucket
+        elif bucket_type_name == "IVFFaiss":
+            bucket_type = IVFBucketFaiss
         assert bucket_type is not None
 
         for level_to_search in range(1, n_levels + 1):
