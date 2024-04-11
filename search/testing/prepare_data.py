@@ -128,7 +128,7 @@ def get_sisap23_data(type: str, size: str) -> npt.ArrayLike:
     return get_data("sisap23", "data", type=type, size=size)
 
 
-def get_sisap23_data(type: str, size: str) -> npt.ArrayLike:
+def get_sisap23_data_normalized(type: str, size: str) -> npt.ArrayLike:
     return get_data_normalized("sisap23", "data", type=type, size=size)
 
 
