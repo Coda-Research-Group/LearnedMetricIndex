@@ -133,4 +133,4 @@ def get_sisap23_data_normalized(type: str, size: str) -> npt.ArrayLike:
 
 
 def get_sisap23_groundtruth_idxs(size: str) -> npt.ArrayLike:
-    return get_data("sisap23", "groundtruth", type=None, size=size) - 1
+    return get_data("sisap23", "groundtruth", type=None, size=size)
