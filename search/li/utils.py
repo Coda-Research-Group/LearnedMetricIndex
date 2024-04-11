@@ -29,6 +29,22 @@ def save_as_pickle(filename: str, obj):
         pickle.dump(obj, f)
 
 
+def load_from_pickle(filename: str) -> Any:
+    """
+    Loads an object from a pickle file.
+    Expects that the file exists.
+
+    Parameters
+    ----------
+    filename : str
+        Path to the file to read from.
+    """
+    import pickle
+
+    with open(filename, "rb") as f:
+        return pickle.load(f)
+
+
 def log_runtime(level: int, message: str):
     """
     A decorator that prints the runtime of the decorated method.
