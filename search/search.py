@@ -3,7 +3,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from urllib.request import urlretrieve
 
 import h5py
@@ -14,7 +14,7 @@ from li.Baseline import Baseline
 from li.BuildConfiguration import BuildConfiguration
 from li.clustering import algorithms
 from li.LearnedIndexBuilder import LearnedIndexBuilder
-from li.utils import save_as_pickle, serialize
+from li.utils import save_as_pickle, load_from_pickle, serialize
 from sklearn import preprocessing
 
 np.random.seed(2023)
@@ -119,6 +119,7 @@ def run(
     preprocess: bool,
     save: bool,
     clustering_algorithms: List[str],
+    load_path: Optional[str] = None
 ):
     assert index_type in {
         "baseline",
@@ -167,6 +168,7 @@ def run(
             queries,
             save,
             size,
+            load_path,
         )
 
 
@@ -184,6 +186,7 @@ def evaluate_learned_index(
     queries: npt.NDArray[np.float32],
     save: bool,
     size: str,
+    load_path: Optional[str] = None
 ):
     s = time.time()
     # ---- data to pd.DataFrame ---- #
@@ -214,31 +217,40 @@ def evaluate_learned_index(
     else:
         data_search = data_pd
         queries_search = queries
-    # ---- prepare index configuration ---- #
-    config = BuildConfiguration(
-        [algorithms[algo] for algo in clustering_algorithms],
-        epochs,
-        model_type,
-        lr,
-        n_categories,
-    )
-    # ---- instantiate the index builder ---- #
-    builder = LearnedIndexBuilder(data_pd, config)
-    # ---- build the index ---- #
-    li, data_prediction, n_buckets_in_index, build_t, cluster_t = builder.build()
-    LOG.info(f"Total number of buckets in the index: {n_buckets_in_index}")
-    LOG.info(f"Cluster time: {cluster_t}")
-    LOG.info(f"Pure build time: {build_t}")
-    LOG.info(f"Overall build time: {time.time() - s}")
 
-    if save:
-        if not os.path.isdir(MODELS_DIR_NAME):
-            os.mkdir(MODELS_DIR_NAME)
-        save_filename = format_models_filename(
-            kind, config, clustering_algorithms, preprocess, size
+    config, li, data_prediction, n_buckets_in_index, build_t, cluster_t = (None,) * 6
+    if load_path is None:
+        # ---- prepare index configuration ---- #
+        config = BuildConfiguration(
+            [algorithms[algo] for algo in clustering_algorithms],
+            epochs,
+            model_type,
+            lr,
+            n_categories,
         )
-        LOG.info(f"Saving as {save_filename}")
-        save_as_pickle(f"{save_filename}.pkl", li)
+        # ---- instantiate the index builder ---- #
+        builder = LearnedIndexBuilder(data_pd, config)
+        # ---- build the index ---- #
+        li, data_prediction, n_buckets_in_index, build_t, cluster_t = builder.build()
+        LOG.info(f"Total number of buckets in the index: {n_buckets_in_index}")
+        LOG.info(f"Cluster time: {cluster_t}")
+        LOG.info(f"Pure build time: {build_t}")
+        LOG.info(f"Overall build time: {time.time() - s}")
+
+        if save:
+            if not os.path.isdir(MODELS_DIR_NAME):
+                os.mkdir(MODELS_DIR_NAME)
+            save_filename = format_models_filename(
+                kind, config, clustering_algorithms, preprocess, size
+            )
+            LOG.info(f"Saving as {save_filename}")
+            save_as_pickle(f"{save_filename}.pkl", (config, li, data_prediction, n_buckets_in_index, build_t, cluster_t))
+    else:
+        config, li, data_prediction, n_buckets_in_index, build_t, cluster_t = load_from_pickle(load_path)
+
+    assert all(map(lambda x: x is not None, (config, li, data_prediction, n_buckets_in_index, build_t, cluster_t)))
+
+    li.train_buckets(data_pd, data_search, data_prediction, len(n_categories), "IVF")
 
     n_buckets = [int((p / 100) * n_buckets_in_index) for p in n_buckets_perc]
     n_buckets = list(set([b for b in n_buckets if b > 0]))
@@ -265,6 +277,7 @@ def evaluate_learned_index(
         )
         LOG.info(f"Sequential search time: {measured_time['seq_search']}")
         LOG.info(f"Sort time: {measured_time['sort']}")
+        LOG.info(f"Distance computations: {measured_time['distance_computations']}")
 
         short_identifier = "learned-index"
         identifier = format_identifier(
@@ -325,6 +338,7 @@ if __name__ == "__main__":
         default=["faiss_kmeans"],
         choices=algorithms.keys(),
     )
+    parser.add_argument("--load-path", default=None, type=str)
     args = parser.parse_args()
 
     validate_and_expand_per_level_arguments(vars(args))
@@ -346,4 +360,5 @@ if __name__ == "__main__":
         args.preprocess,
         args.save,
         args.clustering_algorithm,
+        args.load_path
     )
