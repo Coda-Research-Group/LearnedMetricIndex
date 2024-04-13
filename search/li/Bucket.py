@@ -71,6 +71,7 @@ class IVFBucket(Bucket):
 
     def train(self, data: pd.DataFrame, **kwargs) -> float:
         nlist = kwargs.get('nlist', 5)
+        nlist = min(nlist, len(data))
 
         no, d = data.shape
         s = time.time()
@@ -97,6 +98,7 @@ class IVFBucket(Bucket):
     ) -> Tuple[npt.NDArray[np.float32], npt.NDArray[np.int32], float, int]:
         assert self.data is not None and self.data.trained
         nprobe = kwargs.get('nprobe', 5)
+        nprobe = min(nprobe, self.data.nlist)
 
         self.data.nprobe = nprobe
 
@@ -121,6 +123,7 @@ class IVFBucketFaiss(Bucket):
 
     def train(self, data: pd.DataFrame, **kwargs) -> float:
         nlist = kwargs.get('nlist', 5)
+        nlist = min(nlist, len(data))
 
         no, d = data.shape
         s = time.time()
@@ -146,6 +149,7 @@ class IVFBucketFaiss(Bucket):
     ) -> Tuple[npt.NDArray[np.float32], npt.NDArray[np.int32], float, int]:
         assert self.data is not None
         nprobe = kwargs.get('nprobe', 5)
+        nprobe = min(nprobe, self.data.nlist)
 
         self.data.nprobe = nprobe
 
