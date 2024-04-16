@@ -75,7 +75,8 @@ def get_path(
 def load_data(path: str, emb: str) -> npt.ArrayLike:
     assert os.path.exists(path)
 
-    return h5py.File(path)[emb][:]
+    with h5py.File(path, "r") as f:
+        return f[emb][:]
 
 
 def download(src: str, dst: str) -> None:
