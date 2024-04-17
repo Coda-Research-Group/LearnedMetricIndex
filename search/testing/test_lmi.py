@@ -100,7 +100,7 @@ class IVFTester(Tester):
                 "n_buckets",
                 "nlist",
                 "nprobe",
-                "build_t",
+                "bucket_build_t",
                 "inference",
                 "search_within_buckets",
                 "seq_search",
@@ -110,6 +110,7 @@ class IVFTester(Tester):
                 "recall",
             ],
         )
+
 
 @dataclass
 class NaiveTester(Tester):
@@ -164,7 +165,6 @@ class NaiveTester(Tester):
                 "recall",
             ],
         )
-
 
 
 def load_lmi(
@@ -227,12 +227,7 @@ def main(
         )
     elif bucket_type == "naive":
         tester = NaiveTester(
-            li,
-            config,
-            data_prediction,
-            n_buckets_in_index,
-            n_buckets_range,
-            k
+            li, config, data_prediction, n_buckets_in_index, n_buckets_range, k
         )
     else:
         assert False
