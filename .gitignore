@@ -23,3 +23,6 @@ logs/
 .idea/
 .vscode/
 res.csv
+
+metacentrum
+test_results
