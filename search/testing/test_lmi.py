@@ -111,6 +111,61 @@ class IVFTester(Tester):
             ],
         )
 
+@dataclass
+class NaiveTester(Tester):
+    def __call__(
+        self, data: Data, queries: Data, groundtruth: npt.ArrayLike
+    ) -> pd.DataFrame:
+        # indexing from 1
+        data_navigation = pd.DataFrame(data.navigation)
+        data_navigation.index += 1
+
+        data_search = pd.DataFrame(data.search)
+        data_search.index += 1
+
+        results = []
+
+        for n_buckets in range(*self.n_buckets_range):
+            build_t = self.li.build_buckets(
+                data_navigation,
+                data_search,
+                self.data_prediction,
+                len(self.config.n_categories),
+                "naive",
+            )
+            distances, nns, measured_time = self.li.search_with_buckets(
+                queries.navigation,
+                queries.search,
+                self.config.n_categories,
+                n_buckets,
+                self.k,
+            )
+            recall = get_recall(nns, groundtruth, self.k)
+            results.append(
+                [
+                    n_buckets,
+                    build_t,
+                    *measured_time.values(),
+                    recall,
+                ]
+            )
+
+        return pd.DataFrame(
+            results,
+            columns=[
+                "n_buckets",
+                "build_t",
+                "inference",
+                "search_within_buckets",
+                "seq_search",
+                "sort",
+                "distance_computations",
+                "search",
+                "recall",
+            ],
+        )
+
+
 
 def load_lmi(
     path: str,
@@ -170,7 +225,14 @@ def main(
             kwargs["nprobe_range"],
             count_dc,
         )
-
+    elif bucket_type == "naive":
+        tester = NaiveTester(
+            li,
+            config,
+            data_prediction,
+            n_buckets_in_index,
+            n_buckets_range
+        )
     else:
         assert False
     assert tester is not None
