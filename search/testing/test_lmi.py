@@ -188,10 +188,10 @@ def format_filename(
     type_navigation: str, type_search: str, size: str, bucket_type: str, k: int
 ) -> str:
     return (
-        f"nav={type_navigation}"
-        f"search={type_search}"
-        f"size={size}"
-        f"bucket={bucket_type}"
+        f"nav={type_navigation}_"
+        f"search={type_search}_"
+        f"size={size}_"
+        f"bucket={bucket_type}_"
         f"k={k}"
         ".csv"
     )
@@ -212,7 +212,7 @@ def main(
     config, li, data_prediction, n_buckets_in_index = load_lmi(path)
 
     tester = None
-    if bucket_type == "IVF" or "IVFFaiss":
+    if bucket_type in ["IVF", "IVFFaiss"]:
         count_dc = bucket_type == "IVF"
         tester = IVFTester(
             li,
@@ -231,7 +231,8 @@ def main(
             config,
             data_prediction,
             n_buckets_in_index,
-            n_buckets_range
+            n_buckets_range,
+            k
         )
     else:
         assert False
