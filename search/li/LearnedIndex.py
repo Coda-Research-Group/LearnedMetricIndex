@@ -13,7 +13,7 @@ from li.Logger import Logger
 from li.model import NeuralNetwork, data_X_to_torch
 from li.PriorityQueue import EMPTY_VALUE, PriorityQueue
 from li.utils import filter_path_idxs, log_runtime
-from li.Bucket import Bucket, NaiveBucket, IVFBucket, IVFBucketFaiss
+from li.Bucket import Bucket, NaiveBucket, IVFBucket, IVFBucketFaiss, SketchBucket
 from tqdm import tqdm
 
 torch.manual_seed(2023)
@@ -63,6 +63,8 @@ class LearnedIndex(Logger):
             bucket_type = IVFBucket
         elif bucket_type_name == "IVFFaiss":
             bucket_type = IVFBucketFaiss
+        elif bucket_type_name == "sketch":
+            bucket_type = SketchBucket
         assert bucket_type is not None
 
         for level_to_search in range(1, n_levels + 1):
@@ -97,7 +99,9 @@ class LearnedIndex(Logger):
 
             elif mode == "add":
                 bucket = bucket_models[path]
-                total_time += bucket.add(data_for_this_bucket, bucket_obj_indexes)
+                total_time += bucket.add(
+                    data_for_this_bucket, bucket_obj_indexes, **kwargs
+                )
 
             else:
                 assert False
@@ -661,6 +665,8 @@ class LearnedIndex(Logger):
         t_sort = 0.0
         n_dis_total = 0
 
+        sketches = kwargs.get("sketches", None)
+
         for path, bucket in tqdm(self.bucket_models.items()):
             relevant_query_idxs = filter_path_idxs(bucket_path, path)
 
@@ -668,9 +674,15 @@ class LearnedIndex(Logger):
                 continue
 
             queries_for_this_bucket = queries_search[relevant_query_idxs]
+            relevant_sketches = (
+                None if sketches is None else sketches[relevant_query_idxs]
+            )
 
             indices, distances, t_search, n_dis = bucket.search(
-                queries_for_this_bucket, k, **kwargs
+                queries_for_this_bucket,
+                k,
+                **kwargs,
+                sketches=relevant_sketches,
             )
             t_seq_search += t_search
             n_dis_total += n_dis

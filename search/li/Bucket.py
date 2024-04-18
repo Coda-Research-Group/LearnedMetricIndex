@@ -15,10 +15,12 @@ class Bucket:
     def train(self, data: pd.DataFrame, **kwargs) -> float:
         raise NotImplementedError()
 
-    def add(self, data: pd.DataFrame, original_idxs: npt.ArrayLike) -> float:
+    def add(self, data: pd.DataFrame, original_idxs: npt.ArrayLike, **kwargs) -> float:
         raise NotImplementedError()
 
-    def build(self, data: pd.DataFrame, original_idxs: npt.ArrayLike, **kwargs) -> float:
+    def build(
+        self, data: pd.DataFrame, original_idxs: npt.ArrayLike, **kwargs
+    ) -> float:
         return self.train(data, **kwargs) + self.add(data, original_idxs)
 
     def reset(self) -> None:
@@ -36,7 +38,7 @@ class NaiveBucket(Bucket):
     def train(self, data: pd.DataFrame, **kwargs) -> float:
         return 0.0
 
-    def add(self, data: pd.DataFrame, original_idxs: npt.ArrayLike) -> float:
+    def add(self, data: pd.DataFrame, original_idxs: npt.ArrayLike, **kwargs) -> float:
         assert len(data) == len(original_idxs)
 
         self.original_idxs = original_idxs
@@ -70,7 +72,7 @@ class IVFBucket(Bucket):
     data: Optional[InvertedFileIndex] = None
 
     def train(self, data: pd.DataFrame, **kwargs) -> float:
-        nlist = kwargs.get('nlist', 5)
+        nlist = kwargs.get("nlist", 5)
         nlist = min(nlist, len(data))
 
         no, d = data.shape
@@ -80,7 +82,7 @@ class IVFBucket(Bucket):
 
         return time.time() - s
 
-    def add(self, data: pd.DataFrame, original_idxs: npt.ArrayLike) -> float:
+    def add(self, data: pd.DataFrame, original_idxs: npt.ArrayLike, **kwargs) -> float:
         assert self.data is not None and self.data.trained
         assert len(data) == len(original_idxs)
 
@@ -97,7 +99,7 @@ class IVFBucket(Bucket):
         self, queries: npt.NDArray[np.float32], k: int, **kwargs
     ) -> Tuple[npt.NDArray[np.float32], npt.NDArray[np.int32], float, int]:
         assert self.data is not None and self.data.trained
-        nprobe = kwargs.get('nprobe', 5)
+        nprobe = kwargs.get("nprobe", 5)
         nprobe = min(nprobe, self.data.nlist)
 
         self.data.nprobe = nprobe
@@ -122,7 +124,7 @@ class IVFBucketFaiss(Bucket):
     data: Optional[faiss.IndexIVFFlat] = None
 
     def train(self, data: pd.DataFrame, **kwargs) -> float:
-        nlist = kwargs.get('nlist', 5)
+        nlist = kwargs.get("nlist", 5)
         nlist = min(nlist, len(data))
 
         no, d = data.shape
@@ -133,7 +135,7 @@ class IVFBucketFaiss(Bucket):
 
         return time.time() - s
 
-    def add(self, data: pd.DataFrame, original_idxs: npt.ArrayLike) -> float:
+    def add(self, data: pd.DataFrame, original_idxs: npt.ArrayLike, **kwargs) -> float:
         self.original_idxs = original_idxs
 
         s = time.time()
@@ -148,7 +150,7 @@ class IVFBucketFaiss(Bucket):
         self, queries: npt.NDArray[np.float32], k: int, **kwargs
     ) -> Tuple[npt.NDArray[np.float32], npt.NDArray[np.int32], float, int]:
         assert self.data is not None
-        nprobe = kwargs.get('nprobe', 5)
+        nprobe = kwargs.get("nprobe", 5)
         nprobe = min(nprobe, self.data.nlist)
 
         self.data.nprobe = nprobe
@@ -161,3 +163,77 @@ class IVFBucketFaiss(Bucket):
         t_search = time.time() - s
 
         return indices, distances, t_search, np.NINF
+
+
+class SketchBucket(Bucket):
+    data: Optional[pd.DataFrame] = None
+    sketch_index: Optional[faiss.IndexBinaryFlat] = None
+
+    def train(self, data: pd.DataFrame, **kwargs) -> float:
+        sketches = kwargs.get("sketches", None)
+        assert sketches is not None
+        assert len(data) == len(sketches)
+
+        no, d = sketches.shape
+        self.sketch_index = faiss.IndexBinaryFlat(d * 8)
+        return 0.0
+
+    def add(self, data: pd.DataFrame, original_idxs: npt.ArrayLike, **kwargs) -> float:
+        sketches = kwargs.get("sketches", None)
+        assert sketches is not None
+        assert len(data) == len(original_idxs)
+        assert len(data) == len(sketches)
+        assert self.sketch_index is not None
+
+        self.original_idxs = original_idxs
+        t_start = time.time()
+        self.data = data
+        self.sketch_index.add(sketches)
+        return time.time() - t_start
+
+    def reset(self) -> None:
+        self.data = None
+        self.sketch_index.reset()
+
+    def search(
+        self, queries: npt.NDArray[np.float32], k: int, **kwargs
+    ) -> Tuple[npt.NDArray[np.float32], npt.NDArray[np.int32], float, int]:
+        sketches = kwargs.get("sketches", None)
+        assert self.data is not None
+        assert self.sketch_index is not None
+        assert sketches is not None
+        assert len(queries) == len(sketches)
+
+        c = kwargs.get("c", k * 10)
+        c = min(c, len(self.data))
+
+        s = time.time()
+        sketch_distances, sketch_indices = self.sketch_index.search(
+            sketches,
+            c,
+        )
+
+        dc = 0
+        sim = []
+        ind = []
+
+        for query_idx, query in enumerate(queries):
+            s, i = faiss.knn(
+                [query],
+                self.data.loc[sketch_indices[query_idx]],
+                k,
+                metric=faiss.METRIC_INNER_PRODUCT,
+            )
+
+            sim.append(s)
+            ind.append(i)
+            dc += len(sketch_indices[query_idx])
+
+        t_search = time.time() - s
+
+        similarity = np.array(sim)
+        indices = np.array(ind)
+
+        distances = 1 - similarity
+
+        return indices, distances, t_search, dc
