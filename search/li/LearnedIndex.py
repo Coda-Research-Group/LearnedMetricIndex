@@ -84,6 +84,11 @@ class LearnedIndex(Logger):
         for path, g in data_navigation.groupby(possible_bucket_paths):
             bucket_obj_indexes = g.index.to_numpy()
             data_for_this_bucket = data_search.loc[bucket_obj_indexes].to_numpy()
+            kwargs["sketches"] = (
+                None
+                if kwargs["bucket_sketches"] is None
+                else kwargs["bucket_sketches"].loc[bucket_obj_indexes].to_numpy()
+            )
 
             if mode == "build":
                 bucket = bucket_type()
@@ -107,6 +112,10 @@ class LearnedIndex(Logger):
                 assert False
 
         self.bucket_models = bucket_models
+
+        if "sketches" in kwargs:
+            kwargs.pop("sketches")
+
         return total_time
 
     @log_runtime(INFO, "Built buckets in: {}")
@@ -665,7 +674,7 @@ class LearnedIndex(Logger):
         t_sort = 0.0
         n_dis_total = 0
 
-        sketches = kwargs.get("sketches", None)
+        queries_sketch = kwargs.get("queries_sketch", None)
 
         for path, bucket in tqdm(self.bucket_models.items()):
             relevant_query_idxs = filter_path_idxs(bucket_path, path)
@@ -675,7 +684,7 @@ class LearnedIndex(Logger):
 
             queries_for_this_bucket = queries_search[relevant_query_idxs]
             relevant_sketches = (
-                None if sketches is None else sketches[relevant_query_idxs]
+                None if queries_sketch is None else queries_sketch[relevant_query_idxs]
             )
 
             indices, distances, t_search, n_dis = bucket.search(

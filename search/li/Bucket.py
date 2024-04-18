@@ -12,16 +12,16 @@ class Bucket:
     data: Any
     original_idxs: npt.ArrayLike
 
-    def train(self, data: pd.DataFrame, **kwargs) -> float:
+    def train(self, data: npt.NDArray[np.float32], **kwargs) -> float:
         raise NotImplementedError()
 
-    def add(self, data: pd.DataFrame, original_idxs: npt.ArrayLike, **kwargs) -> float:
+    def add(self, data: npt.NDArray[np.float32], original_idxs: npt.ArrayLike, **kwargs) -> float:
         raise NotImplementedError()
 
     def build(
-        self, data: pd.DataFrame, original_idxs: npt.ArrayLike, **kwargs
+        self, data: npt.NDArray[np.float32], original_idxs: npt.ArrayLike, **kwargs
     ) -> float:
-        return self.train(data, **kwargs) + self.add(data, original_idxs)
+        return self.train(data, **kwargs) + self.add(data, original_idxs, **kwargs)
 
     def reset(self) -> None:
         raise NotImplementedError()
@@ -33,12 +33,12 @@ class Bucket:
 
 
 class NaiveBucket(Bucket):
-    data: Optional[pd.DataFrame]
+    data: Optional[npt.NDArray[np.float32]]
 
-    def train(self, data: pd.DataFrame, **kwargs) -> float:
+    def train(self, data: npt.NDArray[np.float32], **kwargs) -> float:
         return 0.0
 
-    def add(self, data: pd.DataFrame, original_idxs: npt.ArrayLike, **kwargs) -> float:
+    def add(self, data: npt.NDArray[np.float32], original_idxs: npt.ArrayLike, **kwargs) -> float:
         assert len(data) == len(original_idxs)
 
         self.original_idxs = original_idxs
@@ -71,7 +71,7 @@ class NaiveBucket(Bucket):
 class IVFBucket(Bucket):
     data: Optional[InvertedFileIndex] = None
 
-    def train(self, data: pd.DataFrame, **kwargs) -> float:
+    def train(self, data: npt.NDArray[np.float32], **kwargs) -> float:
         nlist = kwargs.get("nlist", 5)
         nlist = min(nlist, len(data))
 
@@ -82,7 +82,7 @@ class IVFBucket(Bucket):
 
         return time.time() - s
 
-    def add(self, data: pd.DataFrame, original_idxs: npt.ArrayLike, **kwargs) -> float:
+    def add(self, data: npt.NDArray[np.float32], original_idxs: npt.ArrayLike, **kwargs) -> float:
         assert self.data is not None and self.data.trained
         assert len(data) == len(original_idxs)
 
@@ -123,7 +123,7 @@ class IVFBucket(Bucket):
 class IVFBucketFaiss(Bucket):
     data: Optional[faiss.IndexIVFFlat] = None
 
-    def train(self, data: pd.DataFrame, **kwargs) -> float:
+    def train(self, data: npt.NDArray[np.float32], **kwargs) -> float:
         nlist = kwargs.get("nlist", 5)
         nlist = min(nlist, len(data))
 
@@ -135,7 +135,7 @@ class IVFBucketFaiss(Bucket):
 
         return time.time() - s
 
-    def add(self, data: pd.DataFrame, original_idxs: npt.ArrayLike, **kwargs) -> float:
+    def add(self, data: npt.NDArray[np.float32], original_idxs: npt.ArrayLike, **kwargs) -> float:
         self.original_idxs = original_idxs
 
         s = time.time()
@@ -166,10 +166,10 @@ class IVFBucketFaiss(Bucket):
 
 
 class SketchBucket(Bucket):
-    data: Optional[pd.DataFrame] = None
+    data: Optional[npt.NDArray[np.float32]] = None
     sketch_index: Optional[faiss.IndexBinaryFlat] = None
 
-    def train(self, data: pd.DataFrame, **kwargs) -> float:
+    def train(self, data: npt.NDArray[np.float32], **kwargs) -> float:
         sketches = kwargs.get("sketches", None)
         assert sketches is not None
         assert len(data) == len(sketches)
@@ -178,7 +178,7 @@ class SketchBucket(Bucket):
         self.sketch_index = faiss.IndexBinaryFlat(d * 8)
         return 0.0
 
-    def add(self, data: pd.DataFrame, original_idxs: npt.ArrayLike, **kwargs) -> float:
+    def add(self, data: npt.NDArray[np.float32], original_idxs: npt.ArrayLike, **kwargs) -> float:
         sketches = kwargs.get("sketches", None)
         assert sketches is not None
         assert len(data) == len(original_idxs)
@@ -220,13 +220,13 @@ class SketchBucket(Bucket):
         for query_idx, query in enumerate(queries):
             s, i = faiss.knn(
                 [query],
-                self.data.loc[sketch_indices[query_idx]],
+                self.data[sketch_indices[query_idx]],
                 k,
                 metric=faiss.METRIC_INNER_PRODUCT,
             )
 
-            sim.append(s)
-            ind.append(i)
+            sim.append(s[0])
+            ind.append(i[0])
             dc += len(sketch_indices[query_idx])
 
         t_search = time.time() - s

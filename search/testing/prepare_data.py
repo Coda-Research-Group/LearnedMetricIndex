@@ -1,4 +1,5 @@
 import numpy.typing as npt
+import numpy as np
 import h5py
 import os
 from urllib.request import urlretrieve
@@ -96,7 +97,9 @@ def get_emb(part: str, type: Optional[str] = None) -> str:
         return "knns"
 
     if type is not None:
-        return {"pca32v2": "pca32", "pca96v2": "pca96"}.get(type, "emb")
+        return {"pca32v2": "pca32", "pca96v2": "pca96", "hammingv2": "hamming"}.get(
+            type, "emb"
+        )
 
     return "emb"
 
@@ -108,7 +111,13 @@ def get_data(
     if not os.path.exists(path):
         download_data(dataset, part, type, size)
 
-    return load_data(path, get_emb(part, type))
+    data = load_data(path, get_emb(part, type))
+
+    if type is not None and type == "hammingv2":
+        assert data.dtype == np.uint64
+        data = data.view(np.uint8)
+
+    return data
 
 
 def get_data_normalized(

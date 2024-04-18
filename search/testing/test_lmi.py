@@ -10,6 +10,8 @@ from testing.prepare_data import (
     get_sisap23_data_normalized,
     get_sisap23_queries_normalized,
     get_sisap23_groundtruth_idxs,
+    get_sisap23_data,
+    get_sisap23_queries,
 )
 import os
 import argparse
@@ -22,6 +24,7 @@ TEST_RESULTS_DIR = "./test_results"
 class Data:
     navigation: npt.ArrayLike
     search: npt.ArrayLike
+    sketch: npt.ArrayLike
 
 
 @dataclass
@@ -32,6 +35,7 @@ class Tester:
     n_buckets_in_index: int
     n_buckets_range: Tuple[int, int, int]
     k: int
+    naive_order: bool
 
     def __call__(
         self, data: Data, queries: Data, groundtruth: npt.ArrayLike
@@ -61,25 +65,24 @@ class IVFTester(Tester):
 
         results = []
 
-        for n_buckets in range(*self.n_buckets_range):
-            for nlist in range(*self.nlist_range):
-                build_t = self.li.build_buckets(
-                    data_navigation,
-                    data_search,
-                    self.data_prediction,
-                    len(self.config.n_categories),
-                    self.bucket_type,
-                    nlist=nlist,
-                )
-                for nprobe in range(
-                    self.nprobe_range[0], nlist + 1, self.nprobe_range[2]
-                ):
+        for nlist in range(*self.nlist_range):
+            build_t = self.li.build_buckets(
+                data_navigation,
+                data_search,
+                self.data_prediction,
+                len(self.config.n_categories),
+                self.bucket_type,
+                nlist=nlist,
+            )
+            for nprobe in range(self.nprobe_range[0], nlist + 1, self.nprobe_range[2]):
+                for n_buckets in range(*self.n_buckets_range):
                     distances, nns, measured_time = self.li.search_with_buckets(
                         queries.navigation,
                         queries.search,
                         self.config.n_categories,
                         n_buckets,
                         self.k,
+                        self.naive_order,
                         nprobe=nprobe,
                     )
                     recall = get_recall(nns, groundtruth, self.k)
@@ -140,6 +143,7 @@ class NaiveTester(Tester):
                 self.config.n_categories,
                 n_buckets,
                 self.k,
+                self.naive_order,
             )
             recall = get_recall(nns, groundtruth, self.k)
             results.append(
@@ -155,6 +159,76 @@ class NaiveTester(Tester):
             results,
             columns=[
                 "n_buckets",
+                "build_t",
+                "inference",
+                "search_within_buckets",
+                "seq_search",
+                "sort",
+                "distance_computations",
+                "search",
+                "recall",
+            ],
+        )
+
+
+@dataclass
+class SketchTester(Tester):
+    c_range: Tuple[int, int, int]
+
+    def __call__(
+        self,
+        data: Data,
+        queries: Data,
+        groundtruth: npt.ArrayLike,
+    ) -> pd.DataFrame:
+        # indexing from 1
+        data_navigation = pd.DataFrame(data.navigation)
+        data_navigation.index += 1
+
+        data_search = pd.DataFrame(data.search)
+        data_search.index += 1
+
+        data_sketch = pd.DataFrame(data.sketch)
+        data_sketch.index += 1
+
+        results = []
+
+        build_t = self.li.build_buckets(
+            data_navigation,
+            data_search,
+            self.data_prediction,
+            len(self.config.n_categories),
+            "sketch",
+            bucket_sketches=data_sketch,
+        )
+        for n_buckets in range(*self.n_buckets_range):
+            for c in range(*self.c_range):
+                distances, nns, measured_time = self.li.search_with_buckets(
+                    queries.navigation,
+                    queries.search,
+                    self.config.n_categories,
+                    n_buckets,
+                    self.k,
+                    self.naive_order,
+                    c=c,
+                    queries_sketch=queries.sketch,
+                )
+                recall = get_recall(nns, groundtruth, self.k)
+                results.append(
+                    [
+                        n_buckets,
+                        c,
+                        build_t,
+                        *measured_time.values(),
+                        recall,
+                    ]
+                )
+
+        return pd.DataFrame(
+            results,
+            columns=[
+                "n_buckets",
+                "c",
                 "build_t",
                 "inference",
                 "search_within_buckets",
@@ -205,6 +279,7 @@ def main(
     type_navigation: str,
     type_search: str,
     size: str,
+    naive_priority_queue: bool,
     **kwargs,
 ) -> None:
     assert os.path.exists(TEST_RESULTS_DIR)
@@ -221,13 +296,31 @@ def main(
             n_buckets_in_index,
             n_buckets_range,
             k,
+            naive_priority_queue,
             kwargs["nlist_range"],
             kwargs["nprobe_range"],
             count_dc,
         )
     elif bucket_type == "naive":
         tester = NaiveTester(
-            li, config, data_prediction, n_buckets_in_index, n_buckets_range, k
+            li,
+            config,
+            data_prediction,
+            n_buckets_in_index,
+            n_buckets_range,
+            k,
+            naive_priority_queue,
+        )
+    elif bucket_type == "sketch":
+        tester = SketchTester(
+            li,
+            config,
+            data_prediction,
+            n_buckets_in_index,
+            n_buckets_range,
+            k,
+            naive_priority_queue,
+            kwargs["c_range"],
         )
     else:
         assert False
@@ -236,10 +329,12 @@ def main(
     data = Data(
         get_sisap23_data_normalized(type_navigation, size),
         get_sisap23_data_normalized(type_search, size),
+        get_sisap23_data("hammingv2", size),
     )
     queries = Data(
         get_sisap23_queries_normalized(type_navigation),
         get_sisap23_queries_normalized(type_search),
+        get_sisap23_queries("hammingv2"),
     )
     groundtruth = get_sisap23_groundtruth_idxs(size)
 
@@ -264,10 +359,12 @@ if __name__ == "__main__":
         "--load-path",
         default="./models/pca32v2-100K-ep=100,100-lr=0.01,0.01-cat=10,10-model=MLP,MLP-clustering_algorithm=faiss_kmeans,faiss_kmeans.pkl",
     )
-    parser.add_argument("--bucket-type", default="IVF")
+    parser.add_argument("--naive-priority-queue", default=True, type=bool)
+    parser.add_argument("--bucket-type", default="sketch")
     parser.add_argument("--n-buckets-range", default=(1, 16, 2), type=literal_eval)
     parser.add_argument("--nlist-range", default=(1, 16, 2), type=literal_eval)
     parser.add_argument("--nprobe-range", default=(1, None, 2), type=literal_eval)
+    parser.add_argument("--c-range", default=(10, 111, 50), type=literal_eval)
     args = parser.parse_args()
 
     main(
@@ -278,6 +375,8 @@ if __name__ == "__main__":
         args.type_navigation,
         args.type_search,
         args.size,
+        args.naive_priority_queue,
         nlist_range=args.nlist_range,
         nprobe_range=args.nprobe_range,
+        c_range=args.c_range,
     )
