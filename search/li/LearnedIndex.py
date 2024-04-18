@@ -86,7 +86,7 @@ class LearnedIndex(Logger):
             data_for_this_bucket = data_search.loc[bucket_obj_indexes].to_numpy()
             kwargs["sketches"] = (
                 None
-                if kwargs["bucket_sketches"] is None
+                if "bucket_sketches" not in kwargs
                 else kwargs["bucket_sketches"].loc[bucket_obj_indexes].to_numpy()
             )
 
