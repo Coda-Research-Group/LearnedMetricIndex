@@ -25,7 +25,7 @@ class LearnedIndex(Logger):
     internal_models: Dict[Tuple, NeuralNetwork]
     bucket_paths: List[Tuple]
     bucket_models: Optional[Dict[Tuple, Bucket]]
-    
+
     def __init__(
         self,
         root_model: NeuralNetwork,
@@ -54,7 +54,7 @@ class LearnedIndex(Logger):
         n_levels: int,
         bucket_type_name: str,
         mode: str,
-        **kwargs
+        **kwargs,
     ) -> float:
         bucket_type = None
         if bucket_type_name == "naive":
@@ -77,7 +77,7 @@ class LearnedIndex(Logger):
         bucket_models = {} if mode in ["build", "train"] else self.bucket_models
         assert bucket_models is not None
 
-        total_time = 0.
+        total_time = 0.0
 
         for path, g in data_navigation.groupby(possible_bucket_paths):
             bucket_obj_indexes = g.index.to_numpy()
@@ -85,7 +85,9 @@ class LearnedIndex(Logger):
 
             if mode == "build":
                 bucket = bucket_type()
-                total_time += bucket.build(data_for_this_bucket, bucket_obj_indexes, **kwargs)
+                total_time += bucket.build(
+                    data_for_this_bucket, bucket_obj_indexes, **kwargs
+                )
                 bucket_models[path] = bucket
 
             elif mode == "train":
@@ -111,9 +113,17 @@ class LearnedIndex(Logger):
         data_prediction: pd.DataFrame,
         n_levels: int,
         bucket_type_name: str = "naive",
-        **kwargs
+        **kwargs,
     ) -> float:
-        return self._create_buckets(data_navigation, data_search, data_prediction, n_levels, bucket_type_name, "build", **kwargs)
+        return self._create_buckets(
+            data_navigation,
+            data_search,
+            data_prediction,
+            n_levels,
+            bucket_type_name,
+            "build",
+            **kwargs,
+        )
 
     @log_runtime(INFO, "Trained buckets in: {}")
     def train_buckets(
@@ -123,9 +133,17 @@ class LearnedIndex(Logger):
         data_prediction: pd.DataFrame,
         n_levels: int,
         bucket_type_name: str = "naive",
-        **kwargs
+        **kwargs,
     ) -> float:
-        return self._create_buckets(data_navigation, data_search, data_prediction, n_levels, bucket_type_name, "train", **kwargs)
+        return self._create_buckets(
+            data_navigation,
+            data_search,
+            data_prediction,
+            n_levels,
+            bucket_type_name,
+            "train",
+            **kwargs,
+        )
 
     @log_runtime(INFO, "Added to buckets in: {}")
     def add_to_buckets(
@@ -135,9 +153,17 @@ class LearnedIndex(Logger):
         data_prediction: pd.DataFrame,
         n_levels: int,
         bucket_type_name: str = "naive",
-        **kwargs
+        **kwargs,
     ) -> float:
-        return self._create_buckets(data_navigation, data_search, data_prediction, n_levels, bucket_type_name, "add", **kwargs)
+        return self._create_buckets(
+            data_navigation,
+            data_search,
+            data_prediction,
+            n_levels,
+            bucket_type_name,
+            "add",
+            **kwargs,
+        )
 
     def search_with_buckets(
         self,
@@ -146,7 +172,8 @@ class LearnedIndex(Logger):
         n_categories: List[int],
         n_buckets: int = 1,
         k: int = 10,
-        **kwargs
+        naive_order: bool = True,
+        **kwargs,
     ) -> Tuple[npt.NDArray, npt.NDArray[np.uint32], Dict[str, float]]:
         """Searches for `k` nearest neighbors for each query in `queries`.
         Buckets must have previously been build with `build_buckets`
@@ -186,10 +213,13 @@ class LearnedIndex(Logger):
         dists_final = None
 
         self.logger.debug("Precomputing bucket order")
-        bucket_order, measured_time["inference"] = self._precompute_bucket_order(
-            queries_navigation=queries_navigation,
-            n_buckets=n_buckets,
-            n_categories=n_categories,
+        bucket_order, bucket_probability, measured_time["inference"] = (
+            self._precompute_bucket_order(
+                queries_navigation=queries_navigation,
+                n_buckets=n_buckets,
+                n_categories=n_categories,
+                naive_order=naive_order,
+            )
         )
 
         # Search in the `n_buckets` most similar buckets
@@ -197,11 +227,13 @@ class LearnedIndex(Logger):
             self.logger.debug(
                 f"Searching in bucket {bucket_order_idx + 1} out of {n_buckets}"
             )
-            (dists, anns, t_all, t_seq_search, t_sort, n_dis) = self._search_single_bucket_built(
-                queries_search=queries_search,
-                bucket_path=bucket_order[:, bucket_order_idx, :],
-                k=k,
-                **kwargs
+            (dists, anns, t_all, t_seq_search, t_sort, n_dis) = (
+                self._search_single_bucket_built(
+                    queries_search=queries_search,
+                    bucket_path=bucket_order[:, bucket_order_idx, :],
+                    k=k,
+                    **kwargs,
+                )
             )
 
             measured_time["search_within_buckets"] += t_all
@@ -241,7 +273,6 @@ class LearnedIndex(Logger):
         measured_time["search"] = time.time() - s
 
         return dists_final, anns_final, measured_time
-
 
     def search(
         self,
@@ -296,10 +327,12 @@ class LearnedIndex(Logger):
         dists_final = None
 
         self.logger.debug("Precomputing bucket order")
-        bucket_order, measured_time["inference"] = self._precompute_bucket_order(
-            queries_navigation=queries_navigation,
-            n_buckets=n_buckets,
-            n_categories=n_categories,
+        bucket_order, bucket_probability, measured_time["inference"] = (
+            self._precompute_bucket_order(
+                queries_navigation=queries_navigation,
+                n_buckets=n_buckets,
+                n_categories=n_categories,
+            )
         )
 
         # Add bucket location to each object as searching is done sequentially per bucket
@@ -313,12 +346,14 @@ class LearnedIndex(Logger):
             self.logger.debug(
                 f"Searching in bucket {bucket_order_idx + 1} out of {n_buckets}"
             )
-            (dists, anns, t_all, t_seq_search, t_sort, n_dis) = self._search_single_bucket(
-                data_navigation=data_navigation,
-                data_search=data_search,
-                queries_search=queries_search,
-                bucket_path=bucket_order[:, bucket_order_idx, :],
-                n_levels=n_levels,
+            (dists, anns, t_all, t_seq_search, t_sort, n_dis) = (
+                self._search_single_bucket(
+                    data_navigation=data_navigation,
+                    data_search=data_search,
+                    queries_search=queries_search,
+                    bucket_path=bucket_order[:, bucket_order_idx, :],
+                    n_levels=n_levels,
+                )
             )
 
             measured_time["search_within_buckets"] += t_all
@@ -372,7 +407,8 @@ class LearnedIndex(Logger):
         queries_navigation: npt.NDArray[np.float32],
         n_buckets: int,
         n_categories: List[int],
-    ) -> Tuple[npt.NDArray[np.int32], float]:
+        naive_order: bool = True,
+    ) -> Tuple[npt.NDArray[np.int32], npt.NDArray[np.float32], float]:
         """
         Precomputes the order in which the queries visit the buckets.
 
@@ -436,26 +472,37 @@ class LearnedIndex(Logger):
             (n_queries, n_buckets, n_levels), fill_value=EMPTY_VALUE, dtype=np.int32
         )
         bucket_order_length = np.zeros(n_queries, dtype=np.int32)
+        bucket_probabilities = np.full(
+            (n_queries, n_buckets), fill_value=np.NINF, dtype=np.float32
+        )
 
         while not np.all(bucket_order_length == n_buckets):
             query_idxs = np.where(bucket_order_length < n_buckets)[0]
-            path_to_visit = pq.pop(query_idxs)
+            path_to_visit, probability = pq.pop(query_idxs)
 
             inference_t = self._visit_internal_nodes(
-                queries_navigation, query_idxs, pq, path_to_visit, n_levels
+                queries_navigation,
+                query_idxs,
+                pq,
+                path_to_visit,
+                probability,
+                n_levels,
+                naive_order=naive_order,
             )
             self._visit_buckets(
                 query_idxs,
                 path_to_visit,
+                probability,
                 bucket_order,
                 bucket_order_length,
+                bucket_probabilities,
             )
 
             total_inference_t += inference_t
 
             pq.sort()
 
-        return bucket_order, total_inference_t
+        return bucket_order, bucket_probabilities, total_inference_t
 
     def _visit_internal_nodes(
         self,
@@ -463,7 +510,9 @@ class LearnedIndex(Logger):
         all_query_idxs: npt.NDArray[np.int32],
         pq: PriorityQueue,
         path_to_visit: npt.NDArray[np.int32],
+        probability: npt.NDArray[np.float32],
         n_levels: int,
+        naive_order: bool = True,
     ) -> float:
         """
         Visits the internal nodes specified by `paths`.
@@ -498,10 +547,16 @@ class LearnedIndex(Logger):
                 child_paths[:] = np.array(path)
                 child_paths[:, level] = categories[:, child_idx]
 
+                probabilites_to_add = (
+                    probabilities[:, child_idx]
+                    if naive_order
+                    else probabilities[:, child_idx] * probability[path_idxs]
+                )
+
                 pq.add(
                     query_idxs,
                     child_paths,
-                    probabilities[:, child_idx],
+                    probabilites_to_add,
                 )
 
         return total_inference_t
@@ -510,12 +565,15 @@ class LearnedIndex(Logger):
         self,
         all_query_idxs: npt.NDArray[np.int32],
         path_to_visit: npt.NDArray[np.int32],
+        probability: npt.NDArray[np.float32],
         bucket_order: npt.NDArray[np.int32],
         bucket_order_length: npt.NDArray[np.int32],
+        bucket_probabilities: npt.NDArray[np.float32],
     ) -> None:
         """
         Visits the buckets specified by `paths`.
         The path to the bucket relevant to each query is then stored in `bucket_order`.
+        The probability of each bucket is then stored in `bucket_probabilities`.
         Done for each possible bucket separately.
         """
         for path in self.bucket_paths:
@@ -527,6 +585,9 @@ class LearnedIndex(Logger):
 
             bucket_order[query_idxs, bucket_order_length[query_idxs], :] = np.array(
                 path
+            )
+            bucket_probabilities[query_idxs, bucket_order_length[query_idxs]] = (
+                np.array(probability[path_idxs])
             )
             bucket_order_length[query_idxs] += 1
 
@@ -587,7 +648,7 @@ class LearnedIndex(Logger):
         queries_search: npt.NDArray[np.float32],
         bucket_path: npt.NDArray[np.int32],
         k: int = 10,
-        **kwargs
+        **kwargs,
     ) -> Tuple[npt.NDArray, npt.NDArray[np.uint32], float, float, float, int]:
         assert self.bucket_models is not None
         s_all = time.time()
@@ -608,7 +669,9 @@ class LearnedIndex(Logger):
 
             queries_for_this_bucket = queries_search[relevant_query_idxs]
 
-            indices, distances, t_search, n_dis = bucket.search(queries_for_this_bucket, k, **kwargs)
+            indices, distances, t_search, n_dis = bucket.search(
+                queries_for_this_bucket, k, **kwargs
+            )
             t_seq_search += t_search
             n_dis_total += n_dis
 

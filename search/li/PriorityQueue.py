@@ -1,5 +1,6 @@
 import numpy as np
 import numpy.typing as npt
+from typing import Tuple
 
 EMPTY_VALUE = -1
 
@@ -49,11 +50,16 @@ class PriorityQueue:
 
         self.length[indices] += 1
 
-    def pop(self, indices: npt.NDArray[np.int32]) -> npt.NDArray[np.int32]:
-        """Pops the next node/bucket path to visit for each query."""
+    def pop(
+        self, indices: npt.NDArray[np.int32]
+    ) -> Tuple[npt.NDArray[np.int32], npt.NDArray[np.float32]]:
+        """
+        Pops the next node/bucket path to visit for each query
+        along with their corresponding probability.
+        """
         self.length[indices] -= 1
 
-        return self.path[indices, self.length[indices], :]
+        return self.path[indices, self.length[indices], :], self.probability[indices, self.length[indices]]
 
     def sort(self) -> None:
         """
