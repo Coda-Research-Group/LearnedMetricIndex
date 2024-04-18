@@ -367,7 +367,7 @@ if __name__ == "__main__":
         "--load-path",
         default="./models/pca32v2-100K-ep=100,100-lr=0.01,0.01-cat=10,10-model=MLP,MLP-clustering_algorithm=faiss_kmeans,faiss_kmeans.pkl",
     )
-    parser.add_argument("--naive-priority-queue", default=True, type=bool)
+    parser.add_argument('--naive-priority-queue', action='store_true')
     parser.add_argument("--bucket-type", default="sketch")
     parser.add_argument("--n-buckets-range", default=(1, 16, 2), type=literal_eval)
     parser.add_argument("--nlist-range", default=(1, 16, 2), type=literal_eval)
