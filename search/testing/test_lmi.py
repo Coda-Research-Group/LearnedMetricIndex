@@ -259,14 +259,20 @@ def get_recall(I, gt, k):
 
 
 def format_filename(
-    type_navigation: str, type_search: str, size: str, bucket_type: str, k: int
+    type_navigation: str,
+    type_search: str,
+    size: str,
+    bucket_type: str,
+    k: int,
+    naive_priority_queue: bool,
 ) -> str:
     return (
         f"nav={type_navigation}_"
         f"search={type_search}_"
         f"size={size}_"
         f"bucket={bucket_type}_"
-        f"k={k}"
+        f"k={k}_"
+        f"naive-pq={naive_priority_queue}"
         ".csv"
     )
 
@@ -342,7 +348,9 @@ def main(
     result.to_csv(
         os.path.join(
             TEST_RESULTS_DIR,
-            format_filename(type_navigation, type_search, size, bucket_type, k),
+            format_filename(
+                type_navigation, type_search, size, bucket_type, k, naive_priority_queue
+            ),
         )
     )
 
