@@ -18,6 +18,8 @@ class LMI(ChromaIndex):
     # maps every object from the dataset to the bucket from the tree leafs
     _data_prediction = None
     _n_categories = None
+    _delete_occurred = False
+    _deleted_labels = set()
 
     def __init__(self):
         self._dataset = []
@@ -131,6 +133,14 @@ class LMI(ChromaIndex):
                 search_until_bucket_not_empty=search_until_bucket_not_empty,
             )
 
+        if self._delete_occurred:
+            # LVD generally supports only single embedding per query that's only first element of nns is modified
+            new_nns = []
+            filtered_labels = [label for label in nns[0] if label not in self._deleted_labels]
+            new_nns.append(filtered_labels)
+            new_nns = np.array(new_nns)
+            nns = new_nns
+
         return nns, dists, bucket_order
 
     def get_items(self, ids=None):
@@ -158,8 +168,8 @@ class LMI(ChromaIndex):
         pass
 
     def mark_deleted(self, label):
-        # TODO: implement grave marking into LMI so it does not return elements that should be perceived as deleted
-        pass
+        self._delete_occurred = True
+        self._deleted_labels.add(label)
 
     def open_file_handles(self):
         # Probably related to HNSW implementation
