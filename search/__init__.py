@@ -1,3 +1,4 @@
+# LVD MODIFICATION START
 from abc import ABC, abstractmethod
 from chromadb.li_index.search.li.clustering import ClusteringAlgorithm
 from typing import List
@@ -98,3 +99,4 @@ class ChromaIndex(ABC):
     max_elements = property()
     num_threads = property()
     space = property()
+# LVD MODIFICATION END

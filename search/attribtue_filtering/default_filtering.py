@@ -1,3 +1,4 @@
+# LVD MODIFICATION START
 import numpy as np
 import warnings
 from itertools import product
@@ -212,3 +213,4 @@ def map_range(value, original_range, new_range):
 
     new_value = (value - original_min) / (original_max - original_min) * (new_max - new_min) + new_min
     return new_value
+# LVD MODIFICATION END

@@ -8,6 +8,7 @@ import numpy.typing as npt
 import pandas as pd
 import torch
 import torch.utils.data
+# LVD MODIFICATION START
 from chromadb.li_index.search.li.BuildConfiguration import BuildConfiguration
 from chromadb.li_index.search.li.clustering import ClusteringAlgorithm
 from chromadb.li_index.search.li.LearnedIndex import LearnedIndex
@@ -15,6 +16,7 @@ from chromadb.li_index.search.li.Logger import Logger
 from chromadb.li_index.search.li.model import LIDataset, ModelParameters, NeuralNetwork, data_X_to_torch
 from chromadb.li_index.search.li.PriorityQueue import EMPTY_VALUE
 from chromadb.li_index.search.li.utils import filter_path_idxs, log_runtime
+# LVD MODIFICATION END
 from tqdm import tqdm
 
 
@@ -298,7 +300,9 @@ class LearnedIndexBuilder(Logger):
         clustering_object, labels = clustering_algorithm(
             np.array(data),
             n_clusters,
+            # LVD MODIFICATION START
             self.config.kmeans,
+            # LVD MODIFICATION END
         )
 
         return clustering_object, labels, time.time() - s

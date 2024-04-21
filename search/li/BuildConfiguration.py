@@ -1,9 +1,10 @@
 from dataclasses import dataclass, field
+# LVD MODIFICATION START
 from typing import Any, List, Union, Dict
 
 from chromadb.li_index.search.li.clustering import ClusteringAlgorithm
 from chromadb.li_index.search.li.model import ModelParameters
-
+# LVD MODIFICATION END
 
 @dataclass
 class BuildConfiguration:
@@ -54,7 +55,9 @@ class BuildConfiguration:
 
     level_configurations: List[ModelParameters] = field(init=False)
     n_levels: int = field(init=False)
+    # LVD MODIFICATION START
     kmeans: Dict = None
+    # LVD MODIFICATION END
 
     def __init__(
         self,
@@ -77,7 +80,9 @@ class BuildConfiguration:
         self.model_types = BuildConfiguration._expand(model_types, len(n_categories))
         self.lrs = BuildConfiguration._expand(lrs, len(n_categories))
         self.n_categories = n_categories
+        # LVD MODIFICATION START
         self.kmeans = kmeans
+        # LVD MODIFICATION END
 
         # Fields that are populated mainly for convenience and readability
         self.level_configurations = [
