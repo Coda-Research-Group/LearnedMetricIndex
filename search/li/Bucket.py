@@ -207,7 +207,7 @@ class SketchBucket(Bucket):
         c = kwargs.get("c", k * 10)
         c = min(c, len(self.data))
 
-        s = time.time()
+        s_t = time.time()
         sketch_distances, sketch_indices = self.sketch_index.search(
             sketches,
             c,
@@ -229,7 +229,7 @@ class SketchBucket(Bucket):
             ind.append(i[0])
             dc += len(sketch_indices[query_idx])
 
-        t_search = time.time() - s
+        t_search = time.time() - s_t
 
         similarity = np.array(sim)
         indices = np.array(ind)
