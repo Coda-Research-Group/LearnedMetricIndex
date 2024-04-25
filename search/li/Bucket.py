@@ -226,7 +226,7 @@ class SketchBucket(Bucket):
             )
 
             sim.append(s[0])
-            ind.append(i[0])
+            ind.append(sketch_indices[query_idx, i[0]])
             dc += len(sketch_indices[query_idx])
 
         t_search = time.time() - s_t
