@@ -11,6 +11,7 @@ import faiss
 class Bucket:
     data: Any
     original_idxs: npt.ArrayLike
+    subset_parameter: int
 
     def train(self, data: npt.NDArray[np.float32], **kwargs) -> float:
         raise NotImplementedError()
@@ -30,8 +31,47 @@ class Bucket:
 
     def search(
         self, queries: npt.NDArray[np.float32], k: int, **kwargs
-    ) -> Tuple[npt.NDArray[np.float32], npt.NDArray[np.int32], float, int]:
+    ) -> Tuple[npt.NDArray[np.int32], npt.NDArray[np.float32], float, int]:
         raise NotImplementedError()
+
+    def _search_impl(
+        self, queries: npt.NDArray[np.float32], k: int, **kwargs
+    ) -> Tuple[npt.NDArray[np.int32], npt.NDArray[np.float32], float, int]:
+        raise NotImplementedError()
+
+    def search_with_subcluster_no(
+        self,
+        queries: npt.NDArray[np.float32],
+        k: int,
+        subclusters_to_search: npt.NDArray[np.int32],
+        **kwargs
+    ) -> Tuple[
+        npt.NDArray[np.int32],
+        npt.NDArray[np.float32],
+        float,
+        int,
+        npt.NDArray[np.uint32],
+    ]:
+        assert len(queries) == len(subclusters_to_search)
+
+        indices = np.empty((len(queries), k), dtype=np.int32)
+        distances = np.empty((len(queries), k))
+        t_search = 0.0
+        distance_computations = 0
+        subclusters_searched = np.empty(len(queries), dtype=np.int32)
+
+        for subcluster_no in np.unique(subclusters_to_search):
+            query_indices = subclusters_to_search == subcluster_no
+            self.subset_parameter = int(subcluster_no)
+            ind, dis, t, dc = self._search_impl(queries[query_indices], k, **kwargs)
+
+            indices[query_indices] = ind
+            distances[query_indices] = dis
+            t_search += t
+            distance_computations += dc
+            subclusters_searched[query_indices] = self.subset_parameter
+
+        return indices, distances, t_search, distance_computations, subclusters_searched
 
 
 class NaiveBucket(Bucket):
@@ -55,7 +95,12 @@ class NaiveBucket(Bucket):
 
     def search(
         self, queries: npt.NDArray[np.float32], k: int, **kwargs
-    ) -> Tuple[npt.NDArray[np.float32], npt.NDArray[np.int32], float, int]:
+    ) -> Tuple[npt.NDArray[np.int32], npt.NDArray[np.float32], float, int]:
+        return self._search_impl(queries, k, **kwargs)
+
+    def _search_impl(
+        self, queries: npt.NDArray[np.float32], k: int, **kwargs
+    ) -> Tuple[npt.NDArray[np.int32], npt.NDArray[np.float32], float, int]:
         assert self.data is not None
 
         s = time.time()
@@ -103,10 +148,18 @@ class IVFBucket(Bucket):
 
     def search(
         self, queries: npt.NDArray[np.float32], k: int, **kwargs
-    ) -> Tuple[npt.NDArray[np.float32], npt.NDArray[np.int32], float, int]:
+    ) -> Tuple[npt.NDArray[np.int32], npt.NDArray[np.float32], float, int]:
+        self.subset_parameter = kwargs.get("nprobe", 5)
+        return self._search_impl(queries, k, **kwargs)
+
+    def _search_impl(
+        self, queries: npt.NDArray[np.float32], k: int, **kwargs
+    ) -> Tuple[npt.NDArray[np.int32], npt.NDArray[np.float32], float, int]:
         assert self.data is not None and self.data.trained
-        nprobe = kwargs.get("nprobe", 5)
+
+        nprobe = self.subset_parameter
         nprobe = min(nprobe, self.data.nlist)
+        self.subset_parameter = nprobe
 
         self.data.nprobe = nprobe
 
@@ -156,10 +209,17 @@ class IVFBucketFaiss(Bucket):
 
     def search(
         self, queries: npt.NDArray[np.float32], k: int, **kwargs
+    ) -> Tuple[npt.NDArray[np.int32], npt.NDArray[np.float32], float, int]:
+        self.subset_parameter = kwargs.get("nprobe", 5)
+        return self._search_impl(queries, k, **kwargs)
+
+    def _search_impl(
+        self, queries: npt.NDArray[np.float32], k: int, **kwargs
     ) -> Tuple[npt.NDArray[np.float32], npt.NDArray[np.int32], float, int]:
         assert self.data is not None
-        nprobe = kwargs.get("nprobe", 5)
+        nprobe = self.subset_parameter
         nprobe = min(nprobe, self.data.nlist)
+        self.subset_parameter = nprobe
 
         self.data.nprobe = nprobe
 
@@ -207,15 +267,22 @@ class SketchBucket(Bucket):
 
     def search(
         self, queries: npt.NDArray[np.float32], k: int, **kwargs
-    ) -> Tuple[npt.NDArray[np.float32], npt.NDArray[np.int32], float, int]:
+    ) -> Tuple[npt.NDArray[np.int32], npt.NDArray[np.float32], float, int]:
+        self.subset_parameter = kwargs.get("c", k * 10)
+        return self._search_impl(queries, k, **kwargs)
+
+    def _search_impl(
+        self, queries: npt.NDArray[np.float32], k: int, **kwargs
+    ) -> Tuple[npt.NDArray[np.int32], npt.NDArray[np.float32], float, int]:
         sketches = kwargs.get("sketches", None)
         assert self.data is not None
         assert self.sketch_index is not None
         assert sketches is not None
         assert len(queries) == len(sketches)
 
-        c = kwargs.get("c", k * 10)
+        c = self.subset_parameter
         c = min(c, len(self.data))
+        self.subset_parameter = c
 
         s_t = time.time()
         sketch_distances, sketch_indices = self.sketch_index.search(
