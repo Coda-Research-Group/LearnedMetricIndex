@@ -15,7 +15,9 @@ class Bucket:
     def train(self, data: npt.NDArray[np.float32], **kwargs) -> float:
         raise NotImplementedError()
 
-    def add(self, data: npt.NDArray[np.float32], original_idxs: npt.ArrayLike, **kwargs) -> float:
+    def add(
+        self, data: npt.NDArray[np.float32], original_idxs: npt.ArrayLike, **kwargs
+    ) -> float:
         raise NotImplementedError()
 
     def build(
@@ -38,7 +40,9 @@ class NaiveBucket(Bucket):
     def train(self, data: npt.NDArray[np.float32], **kwargs) -> float:
         return 0.0
 
-    def add(self, data: npt.NDArray[np.float32], original_idxs: npt.ArrayLike, **kwargs) -> float:
+    def add(
+        self, data: npt.NDArray[np.float32], original_idxs: npt.ArrayLike, **kwargs
+    ) -> float:
         assert len(data) == len(original_idxs)
 
         self.original_idxs = original_idxs
@@ -82,7 +86,9 @@ class IVFBucket(Bucket):
 
         return time.time() - s
 
-    def add(self, data: npt.NDArray[np.float32], original_idxs: npt.ArrayLike, **kwargs) -> float:
+    def add(
+        self, data: npt.NDArray[np.float32], original_idxs: npt.ArrayLike, **kwargs
+    ) -> float:
         assert self.data is not None and self.data.trained
         assert len(data) == len(original_idxs)
 
@@ -135,7 +141,9 @@ class IVFBucketFaiss(Bucket):
 
         return time.time() - s
 
-    def add(self, data: npt.NDArray[np.float32], original_idxs: npt.ArrayLike, **kwargs) -> float:
+    def add(
+        self, data: npt.NDArray[np.float32], original_idxs: npt.ArrayLike, **kwargs
+    ) -> float:
         self.original_idxs = original_idxs
 
         s = time.time()
@@ -178,7 +186,9 @@ class SketchBucket(Bucket):
         self.sketch_index = faiss.IndexBinaryFlat(d * 8)
         return 0.0
 
-    def add(self, data: npt.NDArray[np.float32], original_idxs: npt.ArrayLike, **kwargs) -> float:
+    def add(
+        self, data: npt.NDArray[np.float32], original_idxs: npt.ArrayLike, **kwargs
+    ) -> float:
         sketches = kwargs.get("sketches", None)
         assert sketches is not None
         assert len(data) == len(original_idxs)
