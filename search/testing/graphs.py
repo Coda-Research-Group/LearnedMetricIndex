@@ -85,7 +85,7 @@ class Grapher:
     ) -> Figure:
         return self._scatterplot(
             MetricName("inference", "Inference time"),
-            MetricName("recall", "Recall time"),
+            MetricName("recall", "Recall"),
             self.group_by_col_name,
             filter,
         )
@@ -93,7 +93,7 @@ class Grapher:
     def search_time_to_recall(self, filter: Optional[Dict[str, List]] = None) -> Figure:
         return self._scatterplot(
             MetricName("search", "Search time"),
-            MetricName("recall", "Recall time"),
+            MetricName("recall", "Recall"),
             self.group_by_col_name,
             filter,
         )
@@ -103,7 +103,7 @@ class Grapher:
     ) -> Figure:
         return self._scatterplot(
             MetricName("distance_computations", "Distance computations"),
-            MetricName("recall", "Recall time"),
+            MetricName("recall", "Recall"),
             self.group_by_col_name,
             filter,
         )
