@@ -1,42 +1,135 @@
-import pandas as pd
-import matplotlib.pyplot as plt
-from typing import List
 import os
+import re
+from dataclasses import dataclass
+from typing import List
 
-GRAPHS_FOLDER = "./graphs"
+import matplotlib.pyplot as plt
+import pandas as pd
+from matplotlib.figure import Figure
 
-def recall_distance_computations(data: pd.DataFrame, n_buckets: int, nlist: int, nprobe_list: List[int], path: str) -> None:
-    filtered_data = data[(data['n_buckets'] == n_buckets) & (data['nlist'] == nlist) & (data['nprobe'].isin(nprobe_list))]
-    plt.figure(figsize=(10, 6))
-    for nprobe_value, group_data in filtered_data.groupby('nprobe'):
-        plt.scatter(group_data['recall'], group_data['distance_computations'], label=f'nprobe={nprobe_value}')
+GRAPHS_DIR = "./graphs"
+TEST_RESULT_DIR = "./test_results"
 
-    plt.xlabel('Recall')
-    plt.ylabel('Distance Computations')
-    plt.title('Distance Computations vs. Recall for n_buckets=11, nlist=11')
-    plt.legend()
 
-    # Show plot
-    plt.grid(True)
-    plt.plot()
-    plt.savefig(path)
-    
-def recall_search_time(data: pd.DataFrame, n_buckets: int, nlist: int, nprobe_list: List[int], path: str) -> None:
-    filtered_data = data[(data['n_buckets'] == n_buckets) & (data['nlist'] == nlist) & (data['nprobe'].isin(nprobe_list))]
-    plt.figure(figsize=(10, 6))
-    for nprobe_value, group_data in filtered_data.groupby('nprobe'):
-        plt.scatter(group_data['recall'], group_data['search'], label=f'nprobe={nprobe_value}')
+@dataclass
+class Grapher:
+    data: pd.DataFrame
+    data_navigation: str
+    data_search: str
+    size: str
+    bucket_t: str
+    k: int
+    naive_pq: bool
+    dynamic: bool
 
-    plt.xlabel('Recall')
-    plt.ylabel('Search time')
-    plt.title('Search time vs. Recall for n_buckets=11, nlist=11')
-    plt.legend()
+    figsize = (10, 6)
 
-    # Show plot
-    plt.grid(True)
-    plt.plot()
-    plt.savefig(path)
+    def save_figure(self, figure: Figure, graph_type: str) -> None:
+        filename = (
+            f"{graph_type}_size={self.size}_nav={self.data_navigation}_search={self.data_search}"
+            f"bucket-type={self.bucket_t}_k={self.k}"
+            f"naive-pq={self.naive_pq}_dynamic={self.dynamic}"
+        )
+        path = os.path.join(GRAPHS_DIR, filename)
+        figure.savefig(path)
 
-if __name__ == '__main__':
-    data = pd.read_csv("./test_results/nav=pca96v2search=clip768v2size=300Kbucket=IVFFaissk=10.csv")
-    recall_search_time(data, 11, 11, [1, 4, 7, 10, 13], os.path.join(GRAPHS_FOLDER, "recall_search_time_pca96v2_IVFFaiss"))
+    def inference_time_to_recall(self) -> Figure:
+        figure = plt.figure(figsize=self.figsize)
+        plt.scatter(self.data["inference"], self.data["recall"])
+
+        plt.xlabel("Inference time")
+        plt.ylabel("Recall")
+        plt.title(
+            "Inference time vs. Recall\n"
+            f"bucket: {self.bucket_t}\n"
+            f"({self.data_navigation}, {self.size}, k={self.k}"
+            f"naive priority queue: {self.naive_pq}, dynamic search: {self.dynamic}"
+        )
+        plt.legend()
+        plt.grid(True)
+
+        return figure
+
+    def search_time_to_recall(self) -> Figure:
+        figure = plt.figure(figsize=self.figsize)
+        plt.scatter(self.data["search"], self.data["recall"])
+
+        plt.xlabel("Search time")
+        plt.ylabel("Recall")
+        plt.title(
+            "Search time vs. Recall\n"
+            f"bucket: {self.bucket_t}\n"
+            f"({self.data_navigation}, {self.size}, k={self.k}"
+            f"naive priority queue: {self.naive_pq}, dynamic search: {self.dynamic}"
+        )
+        plt.legend()
+        plt.grid(True)
+
+        return figure
+
+    def distance_computations_to_recall(self) -> Figure:
+        figure = plt.figure(figsize=self.figsize)
+        plt.scatter(self.data["distance_computations"], self.data["recall"])
+
+        plt.xlabel("Distance computations")
+        plt.ylabel("Recall")
+        plt.title(
+            "Distance computations vs. Recall\n"
+            f"bucket: {self.bucket_t}\n"
+            f"({self.data_navigation}, {self.size}, k={self.k}"
+            f"naive priority queue: {self.naive_pq}, dynamic search: {self.dynamic}"
+        )
+        plt.legend()
+        plt.grid(True)
+
+        return figure
+
+
+def get_grapher(filename: str) -> Grapher:
+    mtch = re.match(
+        r"nav=(.+)_search=(.+)_size=(.+)_bucket=(.+)_k=(.+)_naive-pq=(.+)_dynamic=(.+).csv",
+        filename,
+    )
+    assert mtch is not None
+
+    data_navigation, data_search, size, bucket_t, k, naive_pq, dynamic = (
+        mtch.groups()
+    )
+
+    k = int(k)
+    naive_pq = naive_pq == "True"
+    dynamic = dynamic == "True"
+
+    path = os.path.join(TEST_RESULT_DIR, filename)
+    data = pd.read_csv(path)
+
+    return Grapher(
+        data=data,
+        data_navigation=data_navigation,
+        data_search=data_search,
+        size=size,
+        bucket_t=bucket_t,
+        k=k,
+        naive_pq=naive_pq,
+        dynamic=dynamic,
+    )
+
+
+FILENAMES = ["nav=pca32v2_search=clip768v2_size=100K_bucket=sketch_k=10_naive-pq=False_dynamic=False.csv"]
+GRAPHS = [
+    "inference_time_to_recall",
+    "search_time_to_recall",
+    "distance_computations_to_recall",
+]
+
+if __name__ == "__main__":
+    for filename in FILENAMES:
+        grapher = get_grapher(filename)
+
+        for graph_type in GRAPHS:
+            try:
+                graph = getattr(grapher, graph_type)()
+            except AttributeError:
+                continue
+
+            grapher.save_figure(graph, graph_type.replace('_', '-'))
