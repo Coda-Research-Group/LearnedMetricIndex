@@ -15,6 +15,7 @@ from li.PriorityQueue import EMPTY_VALUE, PriorityQueue
 from li.utils import filter_path_idxs, log_runtime
 from li.Bucket import Bucket, NaiveBucket, IVFBucket, IVFBucketFaiss, SketchBucket
 from tqdm import tqdm
+from sklearn.preprocessing import normalize
 
 torch.manual_seed(2023)
 np.random.seed(2023)
@@ -178,115 +179,6 @@ class LearnedIndex(Logger):
             **kwargs,
         )
 
-    def search_with_buckets(
-        self,
-        queries_navigation: npt.NDArray[np.float32],
-        queries_search: npt.NDArray[np.float32],
-        n_categories: List[int],
-        n_buckets: int = 1,
-        k: int = 10,
-        naive_order: bool = True,
-        **kwargs,
-    ) -> Tuple[npt.NDArray, npt.NDArray[np.uint32], Dict[str, float]]:
-        """Searches for `k` nearest neighbors for each query in `queries`.
-        Buckets must have previously been build with `build_buckets`
-
-        Implementation details:
-        - The search is done in two steps:
-            1. The order in which the queries visit the buckets is precomputed.
-            2. The queries are then searched in the `n_buckets` most similar buckets.
-
-        Parameters
-        ----------
-        queries_navigation : npt.NDArray[np.float32]
-            Queries used for navigation.
-        queries_search : npt.NDArray[np.float32]
-            Queries used for the sequential search.
-        n_categories : List[int]
-            Number of categories for each level of the index.
-        n_buckets : int, optional
-            Number of most similar buckets to search in, by default 1
-        k : int, optional
-            Number of nearest neighbors to search for, by default 10
-
-        Returns
-        -------
-        Tuple[npt.NDArray, npt.NDArray[np.uint32], Dict[str, float]]
-            Array of shape (queries_search.shape[0], k) with distances to nearest neighbors for each query,
-            array of shape (queries_search.shape[0], k) with nearest neighbors for each query,
-            dictionary with measured times.
-        """
-        assert self.bucket_models is not None
-
-        measured_time = defaultdict(float)
-
-        s = time.time()
-
-        anns_final = None
-        dists_final = None
-
-        self.logger.debug("Precomputing bucket order")
-        bucket_order, bucket_probability, measured_time["inference"] = (
-            self._precompute_bucket_order(
-                queries_navigation=queries_navigation,
-                n_buckets=n_buckets,
-                n_categories=n_categories,
-                naive_order=naive_order,
-            )
-        )
-
-        # Search in the `n_buckets` most similar buckets
-        for bucket_order_idx in range(n_buckets):
-            self.logger.debug(
-                f"Searching in bucket {bucket_order_idx + 1} out of {n_buckets}"
-            )
-            (dists, anns, t_all, t_seq_search, t_sort, n_dis) = (
-                self._search_single_bucket_built(
-                    queries_search=queries_search,
-                    bucket_path=bucket_order[:, bucket_order_idx, :],
-                    k=k,
-                    **kwargs,
-                )
-            )
-
-            measured_time["search_within_buckets"] += t_all
-            measured_time["seq_search"] += t_seq_search
-            measured_time["sort"] += t_sort
-            measured_time["distance_computations"] += n_dis
-
-            self.logger.debug("Sorting the results")
-            t = time.time()
-            if anns_final is None:
-                anns_final = anns
-                dists_final = dists
-            else:
-                # stacks the results from the previous sorted anns and dists
-                # *_final arrays now have shape (queries.shape[0], k*2)
-                anns_final = np.hstack((anns_final, anns))
-                dists_final = np.hstack((dists_final, dists))
-                # gets the sorted indices of the stacked dists
-                idx_sorted = dists_final.argsort(kind="stable", axis=1)[:, :k]
-                # indexes the final arrays with the sorted indices
-                # *_final arrays now have shape (queries.shape[0], k)
-                idx = np.ogrid[tuple(map(slice, dists_final.shape))]
-                idx[1] = idx_sorted
-                dists_final = dists_final[tuple(idx)]
-                anns_final = anns_final[tuple(idx)]
-
-                assert (
-                    anns_final.shape
-                    == dists_final.shape
-                    == (queries_search.shape[0], k)
-                )
-            self.logger.debug(f"Sorted the results in: {time.time() - t}")
-
-        assert dists_final is not None
-        assert anns_final is not None
-
-        measured_time["search"] = time.time() - s
-
-        return dists_final, anns_final, measured_time
-
     def search(
         self,
         data_navigation: pd.DataFrame,
@@ -331,6 +223,102 @@ class LearnedIndex(Logger):
             array of shape (queries_search.shape[0], k) with nearest neighbors for each query,
             dictionary with measured times.
         """
+        return self._search_impl(
+            data_navigation,
+            queries_navigation,
+            data_search,
+            queries_search,
+            data_prediction,
+            n_categories,
+            False,
+            n_buckets,
+            k,
+            True,
+            False,
+        )
+
+    def search_with_buckets(
+        self,
+        queries_navigation: npt.NDArray[np.float32],
+        queries_search: npt.NDArray[np.float32],
+        n_categories: List[int],
+        n_buckets: int = 1,
+        k: int = 10,
+        naive_order: bool = True,
+        dynamic: bool = True,
+        **kwargs,
+    ) -> Tuple[npt.NDArray, npt.NDArray[np.uint32], Dict[str, float]]:
+        """Searches for `k` nearest neighbors for each query in `queries`.
+        Buckets must have previously been build with `build_buckets`.
+
+        Implementation details:
+        - The search is done in two steps:
+            1. The order in which the queries visit the buckets is precomputed.
+            2. The queries are then searched in the `n_buckets` most similar buckets.
+
+        Parameters
+        ----------
+        queries_navigation : npt.NDArray[np.float32]
+            Queries used for navigation.
+        queries_search : npt.NDArray[np.float32]
+            Queries used for the sequential search.
+        n_categories : List[int]
+            Number of categories for each level of the index.
+        n_buckets : int, optional
+            Number of most similar buckets to search in, by default 1
+        k : int, optional
+            Number of nearest neighbors to search for, by default 10
+        naive_order : bool, optional
+            Whether parent node probabilities are considered in the priority queue, by default True
+        dynamic : bool, optional
+            Whether number of searched subclusters is dependent on bucket's probability, by default True
+        kwargs :
+            Kwargs for the buckets.
+
+        Returns
+        -------
+        Tuple[npt.NDArray, npt.NDArray[np.uint32], Dict[str, float]]
+            Array of shape (queries_search.shape[0], k) with distances to nearest neighbors for each query,
+            array of shape (queries_search.shape[0], k) with nearest neighbors for each query,
+            dictionary with measured times.
+        """
+        assert self.bucket_models is not None
+
+        return self._search_impl(
+            None,
+            queries_navigation,
+            None,
+            queries_search,
+            None,
+            n_categories,
+            True,
+            n_buckets,
+            k,
+            naive_order,
+            dynamic,
+            **kwargs,
+        )
+
+    def _search_impl(
+        self,
+        data_navigation: Optional[pd.DataFrame],
+        queries_navigation: npt.NDArray[np.float32],
+        data_search: Optional[pd.DataFrame],
+        queries_search: npt.NDArray[np.float32],
+        data_prediction: Optional[npt.NDArray[np.int64]],
+        n_categories: List[int],
+        built_buckets: bool,
+        n_buckets: int = 1,
+        k: int = 10,
+        naive_order: bool = True,
+        dynamic: bool = True,
+        **kwargs,
+    ) -> Tuple[npt.NDArray, npt.NDArray[np.uint32], Dict[str, float]]:
+        if not built_buckets:
+            assert data_navigation is not None
+            assert data_search is not None
+            assert data_prediction is not None
+
         measured_time = defaultdict(float)
 
         s = time.time()
@@ -345,14 +333,26 @@ class LearnedIndex(Logger):
                 queries_navigation=queries_navigation,
                 n_buckets=n_buckets,
                 n_categories=n_categories,
+                naive_order=naive_order,
             )
         )
 
-        # Add bucket location to each object as searching is done sequentially per bucket
-        for level_to_search in range(1, n_levels + 1):
-            data_navigation[f"category_L{level_to_search}"] = data_prediction[
-                :, (level_to_search - 1)
-            ]
+        bucket_weights = None
+        if dynamic:
+            # uses L2
+            bucket_weights = normalize(bucket_probability)
+        else:
+            bucket_weights = np.full(
+                bucket_probability.shape, 1 / bucket_probability.shape[1]
+            )
+        assert bucket_weights is not None
+
+        if not built_buckets:
+            # Add bucket location to each object as searching is done sequentially per bucket
+            for level_to_search in range(1, n_levels + 1):
+                data_navigation[f"category_L{level_to_search}"] = data_prediction[
+                    :, (level_to_search - 1)
+                ]
 
         # Search in the `n_buckets` most similar buckets
         for bucket_order_idx in range(n_buckets):
@@ -365,7 +365,10 @@ class LearnedIndex(Logger):
                     data_search=data_search,
                     queries_search=queries_search,
                     bucket_path=bucket_order[:, bucket_order_idx, :],
+                    built_buckets=built_buckets,
                     n_levels=n_levels,
+                    k=k,
+                    **kwargs,
                 )
             )
 
@@ -403,12 +406,13 @@ class LearnedIndex(Logger):
         assert dists_final is not None
         assert anns_final is not None
 
-        # Cleanup the placement of the objects
-        for level_idx_to_search in range(n_levels):
-            column_name = f"category_L{level_idx_to_search + 1}"
+        if not built_buckets:
+            # Cleanup the placement of the objects
+            for level_idx_to_search in range(n_levels):
+                column_name = f"category_L{level_idx_to_search + 1}"
 
-            if column_name in data_navigation.columns:
-                data_navigation.drop(column_name, axis=1, inplace=True)
+                if column_name in data_navigation.columns:
+                    data_navigation.drop(column_name, axis=1, inplace=True)
 
         measured_time["search"] = time.time() - s
 
@@ -611,93 +615,83 @@ class LearnedIndex(Logger):
         data_search: pd.DataFrame,
         queries_search: npt.NDArray[np.float32],
         bucket_path: npt.NDArray[np.int32],
+        built_buckets: bool,
         k: int = 10,
         n_levels: int = 1,
-    ) -> Tuple[npt.NDArray, npt.NDArray[np.uint32], float, float, float, int]:
-        s_all = time.time()
-
-        n_queries = queries_search.shape[0]
-        nns = np.zeros((n_queries, k), dtype=np.uint32)
-        dists = np.full((n_queries, k), fill_value=float("inf"), dtype=float)
-
-        possible_bucket_paths = [
-            f"category_L{level_to_search}" for level_to_search in range(1, n_levels + 1)
-        ]
-
-        t_seq_search = 0.0
-        t_sort = 0.0
-        n_dis_total = 0
-
-        for path, g in tqdm(data_navigation.groupby(possible_bucket_paths)):
-            bucket_obj_indexes = g.index
-
-            relevant_query_idxs = filter_path_idxs(bucket_path, path)
-
-            if bucket_obj_indexes.shape[0] != 0 and relevant_query_idxs.shape[0] != 0:
-                queries_for_this_bucket = queries_search[relevant_query_idxs]
-                data_in_this_bucket = data_search.loc[bucket_obj_indexes].to_numpy()
-
-                s = time.time()
-                similarity, indices = faiss.knn(
-                    queries_for_this_bucket,
-                    data_in_this_bucket,
-                    k,
-                    metric=faiss.METRIC_INNER_PRODUCT,
-                )
-                t_seq_search += time.time() - s
-
-                distances = 1 - similarity
-
-                n_dis_total += len(queries_for_this_bucket) * len(data_in_this_bucket)
-
-                nns[relevant_query_idxs] = bucket_obj_indexes.to_numpy()[indices]
-                dists[relevant_query_idxs] = distances
-
-        return dists, nns, time.time() - s_all, t_seq_search, t_sort, n_dis_total
-
-    @log_runtime(DEBUG, "Searched the buckets in: {}")
-    def _search_single_bucket_built(
-        self,
-        queries_search: npt.NDArray[np.float32],
-        bucket_path: npt.NDArray[np.int32],
-        k: int = 10,
         **kwargs,
     ) -> Tuple[npt.NDArray, npt.NDArray[np.uint32], float, float, float, int]:
-        assert self.bucket_models is not None
         s_all = time.time()
 
         n_queries = queries_search.shape[0]
         nns = np.zeros((n_queries, k), dtype=np.uint32)
         dists = np.full((n_queries, k), fill_value=float("inf"), dtype=float)
 
+        if not built_buckets:
+            possible_bucket_paths = [
+                f"category_L{level_to_search}"
+                for level_to_search in range(1, n_levels + 1)
+            ]
+
         t_seq_search = 0.0
         t_sort = 0.0
         n_dis_total = 0
 
-        queries_sketch = kwargs.get("queries_sketch", None)
+        if built_buckets:
+            queries_sketch = kwargs.get("queries_sketch", None)
+            for path, bucket in tqdm(self.bucket_models.items()):
+                relevant_query_idxs = filter_path_idxs(bucket_path, path)
 
-        for path, bucket in tqdm(self.bucket_models.items()):
-            relevant_query_idxs = filter_path_idxs(bucket_path, path)
+                if relevant_query_idxs.shape[0] == 0:
+                    continue
 
-            if relevant_query_idxs.shape[0] == 0:
-                continue
+                queries_for_this_bucket = queries_search[relevant_query_idxs]
+                relevant_sketches = (
+                    None
+                    if queries_sketch is None
+                    else queries_sketch[relevant_query_idxs]
+                )
 
-            queries_for_this_bucket = queries_search[relevant_query_idxs]
-            relevant_sketches = (
-                None if queries_sketch is None else queries_sketch[relevant_query_idxs]
-            )
+                indices, distances, t_search, n_dis = bucket.search(
+                    queries_for_this_bucket,
+                    k,
+                    **kwargs,
+                    sketches=relevant_sketches,
+                )
+                t_seq_search += t_search
+                n_dis_total += n_dis
 
-            indices, distances, t_search, n_dis = bucket.search(
-                queries_for_this_bucket,
-                k,
-                **kwargs,
-                sketches=relevant_sketches,
-            )
-            t_seq_search += t_search
-            n_dis_total += n_dis
+                # return indexes to original dataset
+                nns[relevant_query_idxs] = bucket.original_idxs[indices]
+                dists[relevant_query_idxs] = distances
+        else:
+            for path, g in tqdm(data_navigation.groupby(possible_bucket_paths)):
+                bucket_obj_indexes = g.index
 
-            # return indexes to original dataset
-            nns[relevant_query_idxs] = bucket.original_idxs[indices]
-            dists[relevant_query_idxs] = distances
+                relevant_query_idxs = filter_path_idxs(bucket_path, path)
+
+                if (
+                    bucket_obj_indexes.shape[0] != 0
+                    and relevant_query_idxs.shape[0] != 0
+                ):
+                    queries_for_this_bucket = queries_search[relevant_query_idxs]
+                    data_in_this_bucket = data_search.loc[bucket_obj_indexes].to_numpy()
+
+                    s = time.time()
+                    similarity, indices = faiss.knn(
+                        queries_for_this_bucket,
+                        data_in_this_bucket,
+                        k,
+                        metric=faiss.METRIC_INNER_PRODUCT,
+                    )
+                    t_seq_search += time.time() - s
+
+                    distances = 1 - similarity
+
+                    n_dis_total += len(queries_for_this_bucket) * len(
+                        data_in_this_bucket
+                    )
+
+                    nns[relevant_query_idxs] = bucket_obj_indexes.to_numpy()[indices]
+                    dists[relevant_query_idxs] = distances
 
         return dists, nns, time.time() - s_all, t_seq_search, t_sort, n_dis_total
