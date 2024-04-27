@@ -679,9 +679,9 @@ class LearnedIndex(Logger):
                     if queries_sketch is None
                     else queries_sketch[relevant_query_idxs]
                 )
-                subclusters_for_this_bucket = subclusters_to_search[relevant_query_idxs]
 
                 if subclusters_to_search is not None:
+                    subclusters_for_this_bucket = subclusters_to_search[relevant_query_idxs]
                     indices, distances, t_search, n_dis, subclusters_searched_q = (
                         bucket.search_with_subcluster_no(
                             queries_for_this_bucket,
