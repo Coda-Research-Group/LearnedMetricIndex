@@ -59,10 +59,15 @@ class Bucket:
         t_search = 0.0
         distance_computations = 0
         subclusters_searched = np.empty(len(queries), dtype=np.int32)
+        sketches = kwargs.get("sketches", None)
 
         for subcluster_no in np.unique(subclusters_to_search):
             query_indices = subclusters_to_search == subcluster_no
             self.subset_parameter = int(subcluster_no)
+
+            if sketches is not None:
+                kwargs["sketches"] = sketches[query_indices]
+
             ind, dis, t, dc = self._search_impl(queries[query_indices], k, **kwargs)
 
             indices[query_indices] = ind
@@ -70,6 +75,8 @@ class Bucket:
             t_search += t
             distance_computations += dc
             subclusters_searched[query_indices] = self.subset_parameter
+
+        kwargs["sketches"] = sketches
 
         return indices, distances, t_search, distance_computations, subclusters_searched
 
