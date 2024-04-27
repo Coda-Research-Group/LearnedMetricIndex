@@ -26,6 +26,7 @@ class LearnedIndex(Logger):
     internal_models: Dict[Tuple, NeuralNetwork]
     bucket_paths: List[Tuple]
     bucket_models: Optional[Dict[Tuple, Bucket]]
+    subcluster_parameter_name: str
 
     def __init__(
         self,
@@ -46,6 +47,7 @@ class LearnedIndex(Logger):
         """List of paths to the buckets."""
 
         self.bucket_models = None
+        self.subcluster_parameter_name = ""
 
     def _create_buckets(
         self,
@@ -60,12 +62,16 @@ class LearnedIndex(Logger):
         bucket_type = None
         if bucket_type_name == "naive":
             bucket_type = NaiveBucket
+            self.subcluster_parameter_name = ""
         elif bucket_type_name == "IVF":
             bucket_type = IVFBucket
+            self.subcluster_parameter_name = "nprobe"
         elif bucket_type_name == "IVFFaiss":
             bucket_type = IVFBucketFaiss
+            self.subcluster_parameter_name = "nprobe"
         elif bucket_type_name == "sketch":
             bucket_type = SketchBucket
+            self.subcluster_parameter_name = "c"
         assert bucket_type is not None
 
         for level_to_search in range(1, n_levels + 1):
@@ -245,7 +251,7 @@ class LearnedIndex(Logger):
         n_buckets: int = 1,
         k: int = 10,
         naive_order: bool = True,
-        dynamic: bool = True,
+        dynamic: bool = False,
         **kwargs,
     ) -> Tuple[npt.NDArray, npt.NDArray[np.uint32], Dict[str, float]]:
         """Searches for `k` nearest neighbors for each query in `queries`.
@@ -340,12 +346,16 @@ class LearnedIndex(Logger):
         bucket_weights = None
         if dynamic:
             # uses L2
-            bucket_weights = normalize(bucket_probability)
+            bucket_weights = normalize(bucket_probability, norm='l1')
         else:
             bucket_weights = np.full(
                 bucket_probability.shape, 1 / bucket_probability.shape[1]
             )
         assert bucket_weights is not None
+
+        if dynamic:
+            subcluster_parameter = kwargs.get(self.subcluster_parameter_name, n_buckets)
+            remaining_subclusters = np.full(len(queries_search), subcluster_parameter)
 
         if not built_buckets:
             # Add bucket location to each object as searching is done sequentially per bucket
@@ -356,21 +366,33 @@ class LearnedIndex(Logger):
 
         # Search in the `n_buckets` most similar buckets
         for bucket_order_idx in range(n_buckets):
+            subclusters_to_search = None
+            if dynamic:
+                subclusters_to_search = (remaining_subclusters * bucket_weights[:, 0]).astype(np.uint32)
+                new_weights = bucket_weights[:, 1:]
+                if new_weights.shape[1] > 0:
+                    new_weights = normalize(new_weights, norm='l1')
+                bucket_weights = new_weights
+
             self.logger.debug(
                 f"Searching in bucket {bucket_order_idx + 1} out of {n_buckets}"
             )
-            (dists, anns, t_all, t_seq_search, t_sort, n_dis) = (
+            (dists, anns, t_all, t_seq_search, t_sort, n_dis, subclusters_searched) = (
                 self._search_single_bucket(
                     data_navigation=data_navigation,
                     data_search=data_search,
                     queries_search=queries_search,
                     bucket_path=bucket_order[:, bucket_order_idx, :],
                     built_buckets=built_buckets,
+                    subclusters_to_search=subclusters_to_search,
                     n_levels=n_levels,
                     k=k,
                     **kwargs,
                 )
             )
+
+            if dynamic:
+                remaining_subclusters -= subclusters_searched
 
             measured_time["search_within_buckets"] += t_all
             measured_time["seq_search"] += t_seq_search
@@ -616,6 +638,7 @@ class LearnedIndex(Logger):
         queries_search: npt.NDArray[np.float32],
         bucket_path: npt.NDArray[np.int32],
         built_buckets: bool,
+        subclusters_to_search: npt.NDArray[np.int32],
         k: int = 10,
         n_levels: int = 1,
         **kwargs,
@@ -636,8 +659,14 @@ class LearnedIndex(Logger):
         t_sort = 0.0
         n_dis_total = 0
 
+        subclusters_searched = None
+
         if built_buckets:
             queries_sketch = kwargs.get("queries_sketch", None)
+
+            if subclusters_to_search is not None:
+                subclusters_searched = np.empty_like(subclusters_to_search)
+
             for path, bucket in tqdm(self.bucket_models.items()):
                 relevant_query_idxs = filter_path_idxs(bucket_path, path)
 
@@ -650,13 +679,28 @@ class LearnedIndex(Logger):
                     if queries_sketch is None
                     else queries_sketch[relevant_query_idxs]
                 )
+                subclusters_for_this_bucket = subclusters_to_search[relevant_query_idxs]
 
-                indices, distances, t_search, n_dis = bucket.search(
-                    queries_for_this_bucket,
-                    k,
-                    **kwargs,
-                    sketches=relevant_sketches,
-                )
+                if subclusters_to_search is not None:
+                    indices, distances, t_search, n_dis, subclusters_searched_q = (
+                        bucket.search_with_subcluster_no(
+                            queries_for_this_bucket,
+                            k,
+                            subclusters_for_this_bucket,
+                            **kwargs,
+                            sketches=relevant_sketches,
+                        )
+                    )
+
+                    subclusters_searched[relevant_query_idxs] = subclusters_searched_q
+
+                else:
+                    indices, distances, t_search, n_dis = bucket.search(
+                        queries_for_this_bucket,
+                        k,
+                        **kwargs,
+                        sketches=relevant_sketches,
+                    )
                 t_seq_search += t_search
                 n_dis_total += n_dis
 
@@ -694,4 +738,12 @@ class LearnedIndex(Logger):
                     nns[relevant_query_idxs] = bucket_obj_indexes.to_numpy()[indices]
                     dists[relevant_query_idxs] = distances
 
-        return dists, nns, time.time() - s_all, t_seq_search, t_sort, n_dis_total
+        return (
+            dists,
+            nns,
+            time.time() - s_all,
+            t_seq_search,
+            t_sort,
+            n_dis_total,
+            subclusters_searched,
+        )
