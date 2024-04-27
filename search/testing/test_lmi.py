@@ -36,6 +36,7 @@ class Tester:
     n_buckets_range: Tuple[int, int, int]
     k: int
     naive_order: bool
+    dynamic: bool
 
     def __call__(
         self, data: Data, queries: Data, groundtruth: npt.ArrayLike
@@ -83,6 +84,7 @@ class IVFTester(Tester):
                         n_buckets,
                         self.k,
                         self.naive_order,
+                        self.dynamic,
                         nprobe=nprobe,
                     )
                     recall = get_recall(nns, groundtruth, self.k)
@@ -210,6 +212,7 @@ class SketchTester(Tester):
                     n_buckets,
                     self.k,
                     self.naive_order,
+                    self.dynamic,
                     c=c,
                     queries_sketch=queries.sketch,
                 )
@@ -286,6 +289,7 @@ def main(
     type_search: str,
     size: str,
     naive_priority_queue: bool,
+    dynamic: bool,
     **kwargs,
 ) -> None:
     assert os.path.exists(TEST_RESULTS_DIR)
@@ -303,6 +307,7 @@ def main(
             n_buckets_range,
             k,
             naive_priority_queue,
+            dynamic,
             kwargs["nlist_range"],
             kwargs["nprobe_range"],
             count_dc,
@@ -316,6 +321,7 @@ def main(
             n_buckets_range,
             k,
             naive_priority_queue,
+            dynamic,
         )
     elif bucket_type == "sketch":
         tester = SketchTester(
@@ -326,6 +332,7 @@ def main(
             n_buckets_range,
             k,
             naive_priority_queue,
+            dynamic,
             kwargs["c_range"],
         )
     else:
@@ -367,12 +374,13 @@ if __name__ == "__main__":
         "--load-path",
         default="./models/pca32v2-100K-ep=100,100-lr=0.01,0.01-cat=10,10-model=MLP,MLP-clustering_algorithm=faiss_kmeans,faiss_kmeans.pkl",
     )
-    parser.add_argument('--naive-priority-queue', action='store_true')
+    parser.add_argument("--naive-priority-queue", action="store_true")
+    parser.add_argument("--dynamic", action="store_true")
     parser.add_argument("--bucket-type", default="sketch")
-    parser.add_argument("--n-buckets-range", default=(1, 16, 2), type=literal_eval)
+    parser.add_argument("--n-buckets-range", default=(2, 3, 2), type=literal_eval)
     parser.add_argument("--nlist-range", default=(1, 16, 2), type=literal_eval)
     parser.add_argument("--nprobe-range", default=(1, None, 2), type=literal_eval)
-    parser.add_argument("--c-range", default=(10, 111, 50), type=literal_eval)
+    parser.add_argument("--c-range", default=(100, 111, 50), type=literal_eval)
     args = parser.parse_args()
 
     main(
@@ -384,6 +392,7 @@ if __name__ == "__main__":
         args.type_search,
         args.size,
         args.naive_priority_queue,
+        args.dynamic,
         nlist_range=args.nlist_range,
         nprobe_range=args.nprobe_range,
         c_range=args.c_range,
