@@ -102,7 +102,7 @@ class Grapher:
                     )
 
                 ax.set_xlabel(x_name.full_name)
-                ax.set_xlabel(y_name.full_name)
+                ax.set_ylabel(y_name.full_name)
                 ax.set_title(f"{group_by_names[1].full_name} = {group_by_value}")
                 ax.legend()
                 ax.grid(True)
@@ -120,16 +120,16 @@ class Grapher:
         self, filter: Optional[Dict[str, List]] = None
     ) -> Figure:
         return self._scatterplot(
-            MetricName("inference", "Inference time"),
             MetricName("recall", "Recall"),
+            MetricName("inference", "Inference time"),
             self.group_by_col_names,
             filter,
         )
 
     def search_time_to_recall(self, filter: Optional[Dict[str, List]] = None) -> Figure:
         return self._scatterplot(
-            MetricName("search", "Search time"),
             MetricName("recall", "Recall"),
+            MetricName("search", "Search time"),
             self.group_by_col_names,
             filter,
         )
@@ -138,8 +138,8 @@ class Grapher:
         self, filter: Optional[Dict[str, List]] = None
     ) -> Figure:
         return self._scatterplot(
-            MetricName("distance_computations", "Distance computations"),
             MetricName("recall", "Recall"),
+            MetricName("distance_computations", "Distance computations"),
             self.group_by_col_names,
             filter,
         )
@@ -188,14 +188,14 @@ def get_grapher(filename: str) -> Grapher:
 
 
 FILENAMES = [
-    "nav=pca32v2_search=clip768v2_size=100K_bucket=IVFFaiss_k=10_naive-pq=False_dynamic=True.csv"
+'nav=pca96v2_search=clip768v2_size=10M_bucket=IVF_k=10_naive-pq=False_dynamic=False.csv'
 ]
 GRAPHS = [
     "inference_time_to_recall",
     "search_time_to_recall",
     "distance_computations_to_recall",
 ]
-FILTER = {"nlist": [1, 5, 9, 15]}
+FILTER = None
 
 if __name__ == "__main__":
     for filename in FILENAMES:
