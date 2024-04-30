@@ -296,6 +296,7 @@ def main(
     size: str,
     naive_priority_queue: bool,
     dynamic: bool,
+    append_results: bool,
     **kwargs,
 ) -> None:
     assert os.path.exists(TEST_RESULTS_DIR)
@@ -358,20 +359,24 @@ def main(
     groundtruth = get_sisap23_groundtruth_idxs(size)
 
     result = tester(data, queries, groundtruth)
-    result.to_csv(
-        os.path.join(
-            TEST_RESULTS_DIR,
-            format_filename(
-                type_navigation,
-                type_search,
-                size,
-                bucket_type,
-                k,
-                naive_priority_queue,
-                dynamic,
-            ),
-        )
+    result_path = os.path.join(
+        TEST_RESULTS_DIR,
+        format_filename(
+            type_navigation,
+            type_search,
+            size,
+            bucket_type,
+            k,
+            naive_priority_queue,
+            dynamic,
+        ),
     )
+
+    if append_results and os.path.exists(result_path):
+        existing = pd.read_csv(result_path)
+        result = pd.concat([existing, result])
+
+    result.to_csv(result_path)
 
 
 if __name__ == "__main__":
@@ -393,6 +398,7 @@ if __name__ == "__main__":
     parser.add_argument("--nlist", nargs="+", default=[50], type=int)
     parser.add_argument("--nprobe", nargs="+", default=[20], type=int)
     parser.add_argument("--c", nargs="+", default=[1000], type=int)
+    parser.add_argument("--append-results", action="store_true")
 
     args = parser.parse_args()
 
@@ -406,6 +412,7 @@ if __name__ == "__main__":
         args.size,
         args.naive_priority_queue,
         args.dynamic,
+        args.append_results,
         nlist=args.nlist,
         nprobe=args.nprobe,
         c=args.c,
