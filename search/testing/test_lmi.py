@@ -1,5 +1,5 @@
 from li.utils import load_from_pickle
-from typing import Tuple, Optional
+from typing import Tuple, List
 from li.BuildConfiguration import BuildConfiguration
 from li.LearnedIndex import LearnedIndex
 import numpy as np
@@ -33,7 +33,7 @@ class Tester:
     config: BuildConfiguration
     data_prediction: npt.ArrayLike
     n_buckets_in_index: int
-    n_buckets_range: Tuple[int, int, int]
+    n_buckets: List[int]
     k: int
     naive_order: bool
     dynamic: bool
@@ -46,8 +46,8 @@ class Tester:
 
 @dataclass
 class IVFTester(Tester):
-    nlist_range: Tuple[int, int, int]
-    nprobe_range: Tuple[int, None, int]
+    nlist: List[int]
+    nprobe: List[int]
     count_distance_computations: bool
 
     @property
@@ -66,7 +66,7 @@ class IVFTester(Tester):
 
         results = []
 
-        for nlist in range(*self.nlist_range):
+        for nlist in self.nlist:
             build_t = self.li.build_buckets(
                 data_navigation,
                 data_search,
@@ -75,8 +75,12 @@ class IVFTester(Tester):
                 self.bucket_type,
                 nlist=nlist,
             )
-            for nprobe in range(self.nprobe_range[0], nlist + 1, self.nprobe_range[2]):
-                for n_buckets in range(*self.n_buckets_range):
+
+            for nprobe in self.nprobe:
+                if nprobe > nlist:
+                    continue
+
+                for n_buckets in self.n_buckets:
                     distances, nns, measured_time = self.li.search_with_buckets(
                         queries.navigation,
                         queries.search,
@@ -131,7 +135,7 @@ class NaiveTester(Tester):
 
         results = []
 
-        for n_buckets in range(*self.n_buckets_range):
+        for n_buckets in self.n_buckets:
             build_t = self.li.build_buckets(
                 data_navigation,
                 data_search,
@@ -175,7 +179,7 @@ class NaiveTester(Tester):
 
 @dataclass
 class SketchTester(Tester):
-    c_range: Tuple[int, int, int]
+    c: List[int]
 
     def __call__(
         self,
@@ -203,8 +207,8 @@ class SketchTester(Tester):
             "sketch",
             bucket_sketches=data_sketch,
         )
-        for n_buckets in range(*self.n_buckets_range):
-            for c in range(*self.c_range):
+        for n_buckets in self.n_buckets:
+            for c in self.c:
                 distances, nns, measured_time = self.li.search_with_buckets(
                     queries.navigation,
                     queries.search,
@@ -283,7 +287,7 @@ def format_filename(
 def main(
     path: str,
     bucket_type: str,
-    n_buckets_range: Tuple[int, int, int],
+    n_buckets: List[int],
     k: int,
     type_navigation: str,
     type_search: str,
@@ -304,12 +308,12 @@ def main(
             config,
             data_prediction,
             n_buckets_in_index,
-            n_buckets_range,
+            n_buckets,
             k,
             naive_priority_queue,
             dynamic,
-            kwargs["nlist_range"],
-            kwargs["nprobe_range"],
+            kwargs["nlist"],
+            kwargs["nprobe"],
             count_dc,
         )
     elif bucket_type == "naive":
@@ -318,7 +322,7 @@ def main(
             config,
             data_prediction,
             n_buckets_in_index,
-            n_buckets_range,
+            n_buckets,
             k,
             naive_priority_queue,
             dynamic,
@@ -329,11 +333,11 @@ def main(
             config,
             data_prediction,
             n_buckets_in_index,
-            n_buckets_range,
+            n_buckets,
             k,
             naive_priority_queue,
             dynamic,
-            kwargs["c_range"],
+            kwargs["c"],
         )
     else:
         assert False
@@ -376,24 +380,25 @@ if __name__ == "__main__":
     )
     parser.add_argument("--naive-priority-queue", action="store_true")
     parser.add_argument("--dynamic", action="store_true")
-    parser.add_argument("--bucket-type", default="sketch")
-    parser.add_argument("--n-buckets-range", default=(2, 3, 2), type=literal_eval)
-    parser.add_argument("--nlist-range", default=(1, 16, 2), type=literal_eval)
-    parser.add_argument("--nprobe-range", default=(1, None, 2), type=literal_eval)
-    parser.add_argument("--c-range", default=(100, 111, 50), type=literal_eval)
+    parser.add_argument("--bucket-type", default="IVF")
+    parser.add_argument("--n-buckets", nargs="+", default=[50], type=int)
+    parser.add_argument("--nlist", nargs="+", default=[50], type=int)
+    parser.add_argument("--nprobe", nargs="+", default=[20], type=int)
+    parser.add_argument("--c", nargs="+", default=[1000], type=int)
+
     args = parser.parse_args()
 
     main(
         args.load_path,
         args.bucket_type,
-        args.n_buckets_range,
+        args.n_buckets,
         args.k,
         args.type_navigation,
         args.type_search,
         args.size,
         args.naive_priority_queue,
         args.dynamic,
-        nlist_range=args.nlist_range,
-        nprobe_range=args.nprobe_range,
-        c_range=args.c_range,
+        nlist=args.nlist,
+        nprobe=args.nprobe,
+        c=args.c,
     )
