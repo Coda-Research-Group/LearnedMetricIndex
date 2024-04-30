@@ -376,7 +376,7 @@ def main(
         existing = pd.read_csv(result_path)
         result = pd.concat([existing, result])
 
-    result.to_csv(result_path)
+    result.to_csv(result_path, index=False)
 
 
 if __name__ == "__main__":
