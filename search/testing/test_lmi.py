@@ -125,8 +125,6 @@ class NaiveTester(Tester):
     def __call__(
         self, data: Data, queries: Data, groundtruth: npt.ArrayLike
     ) -> pd.DataFrame:
-        assert data.sketch is not None and queries.sketch is not None
-
         # indexing from 1
         data_navigation = pd.DataFrame(data.navigation)
         data_navigation.index += 1
@@ -177,6 +175,54 @@ class NaiveTester(Tester):
             ],
         )
 
+@dataclass
+class NoBucketsTester(Tester):
+    def __call__(
+        self, data: Data, queries: Data, groundtruth: npt.ArrayLike
+    ) -> pd.DataFrame:
+        # indexing from 1
+        data_navigation = pd.DataFrame(data.navigation)
+        data_navigation.index += 1
+
+        data_search = pd.DataFrame(data.search)
+        data_search.index += 1
+
+        results = []
+
+        for n_buckets in self.n_buckets:
+            distances, nns, measured_time = self.li.search(
+                data.navigation,
+                queries.navigation,
+                data.search,
+                queries.search,
+                self.data_prediction,
+                self.config.n_categories,
+                n_buckets,
+                self.k,
+            )
+            recall = get_recall(nns, groundtruth, self.k)
+            results.append(
+                [
+                    n_buckets,
+                    *measured_time.values(),
+                    recall,
+                ]
+            )
+
+        return pd.DataFrame(
+            results,
+            columns=[
+                "n_buckets",
+                "inference",
+                "search_within_buckets",
+                "seq_search",
+                "sort",
+                "distance_computations",
+                "search",
+                "recall",
+            ],
+        )
+
 
 @dataclass
 class SketchTester(Tester):
@@ -188,6 +234,8 @@ class SketchTester(Tester):
         queries: Data,
         groundtruth: npt.ArrayLike,
     ) -> pd.DataFrame:
+        assert data.sketch is not None and queries.sketch is not None
+
         # indexing from 1
         data_navigation = pd.DataFrame(data.navigation)
         data_navigation.index += 1
@@ -306,7 +354,29 @@ def main(
     config, li, data_prediction, n_buckets_in_index = load_lmi(path)
 
     tester = None
-    if bucket_type in ["IVF", "IVFFaiss"]:
+    if bucket_type == "naive":
+        tester = NaiveTester(
+            li,
+            config,
+            data_prediction,
+            n_buckets_in_index,
+            n_buckets,
+            k,
+            naive_priority_queue,
+            dynamic,
+        )
+    if bucket_type == "none":
+        tester = NoBucketsTester(
+            li,
+            config,
+            data_prediction,
+            n_buckets_in_index,
+            n_buckets,
+            k,
+            naive_priority_queue,
+            dynamic,
+        )
+    elif bucket_type in ["IVF", "IVFFaiss"]:
         count_dc = bucket_type == "IVF"
         tester = IVFTester(
             li,
@@ -321,17 +391,7 @@ def main(
             kwargs["nprobe"],
             count_dc,
         )
-    elif bucket_type == "naive":
-        tester = NaiveTester(
-            li,
-            config,
-            data_prediction,
-            n_buckets_in_index,
-            n_buckets,
-            k,
-            naive_priority_queue,
-            dynamic,
-        )
+
     elif bucket_type == "sketch":
         tester = SketchTester(
             li,
