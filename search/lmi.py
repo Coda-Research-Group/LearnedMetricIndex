@@ -3,6 +3,8 @@ import numpy as np
 import pandas as pd
 import sys
 import faiss
+import pickle
+import os
 
 from chromadb.li_index.search import ChromaIndex
 from chromadb.li_index.search.li.LearnedIndexBuilder import LearnedIndexBuilder
@@ -21,13 +23,14 @@ class LMI(ChromaIndex):
     _n_categories = None
     _delete_occurred = False
     _deleted_labels = set()
+    _persistence_location = None
+    _index_file_name = 'lmi_index.pkl'
 
     def __init__(self):
         self._dataset = []
 
     def add_items(self, data: List[Union[Sequence[float], Sequence[int]]], ids=None, num_threads=-1,
                   replace_deleted=False):
-        # TODO: this needs to be parallelized since it is the slowest part of the process
         self._dataset.extend(data)
 
     def init_index(self,
@@ -52,6 +55,7 @@ class LMI(ChromaIndex):
             }}
              """)
         self._n_categories = n_categories
+        self._persistence_location = persistence_location
         self._build_config = BuildConfiguration(
             clustering_algorithms,
             epochs,
@@ -165,8 +169,16 @@ class LMI(ChromaIndex):
         return sys.maxsize
 
     def load_index(self, path_to_index, max_elements=0, allow_replace_deleted=False, is_persistent_index=False):
-        # TODO: Loading from pickle file trained LMI index
-        pass
+        if not os.path.exists(path_to_index):
+            raise FileNotFoundError(f"No pickle file found at the specified path: {path_to_index}")
+
+        full_path_to_index = os.path.join(path_to_index, self._index_file_name)
+        with open(full_path_to_index, 'rb') as f:
+            loaded_instance = pickle.load(f)
+
+        self.__dict__.update(loaded_instance.__dict__)
+
+        print(f"Index loaded from {path_to_index}")
 
     def mark_deleted(self, label):
         self._delete_occurred = True
@@ -177,12 +189,18 @@ class LMI(ChromaIndex):
         pass
 
     def persist_dirty(self):
-        # Not sure what this is for?
-        pass
+        if self._persistence_location is None:
+            raise ValueError("Persistence location must be set before persisting data.")
 
-    def save_index(self, path_to_index):
-        # TODO: implement saving triugh pickle file
-        pass
+        os.makedirs(self._persistence_location, exist_ok=True)
+
+        file_path = os.path.join(self._persistence_location, self._index_file_name)
+
+        with open(file_path, 'wb') as f:
+            pickle.dump(self, f)
+
+        print(f"Index persisted at {file_path}")
+
 
     def set_num_threads(self, num_threads):
         # LMI currently works only one single thread so no need for this
@@ -193,16 +211,5 @@ class LMI(ChromaIndex):
         pass
 
     def unmark_deleted(self, label):
-        # TODO: same as mark_deleted
-        pass
-
-    # TODO: find out if these are necessary
-    def __getstate__(self):
-        pass
-
-    def __repr__(self):
-        pass
-
-    def __setstate__(self, arg0):
         pass
 # LVD MODIFICATION END

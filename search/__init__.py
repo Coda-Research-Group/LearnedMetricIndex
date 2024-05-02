@@ -67,10 +67,6 @@ class ChromaIndex(ABC):
         pass
 
     @abstractmethod
-    def save_index(self, path_to_index):
-        pass
-
-    @abstractmethod
     def set_num_threads(self, num_threads):
         pass
 
@@ -79,19 +75,7 @@ class ChromaIndex(ABC):
         pass
 
     @abstractmethod
-    def __getstate__(self):
-        pass
-
-    @abstractmethod
     def __init__(self, *args, **kwargs):
-        pass
-
-    @abstractmethod
-    def __repr__(self):
-        pass
-
-    @abstractmethod
-    def __setstate__(self, arg0):
         pass
 
     # Properties
