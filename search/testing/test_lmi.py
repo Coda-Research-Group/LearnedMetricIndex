@@ -191,9 +191,9 @@ class NoBucketsTester(Tester):
 
         for n_buckets in self.n_buckets:
             distances, nns, measured_time = self.li.search(
-                data.navigation,
+                data_navigation,
                 queries.navigation,
-                data.search,
+                data_search,
                 queries.search,
                 self.data_prediction,
                 self.config.n_categories,
