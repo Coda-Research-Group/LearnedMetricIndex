@@ -1,5 +1,5 @@
 from li.utils import load_from_pickle
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 from li.BuildConfiguration import BuildConfiguration
 from li.LearnedIndex import LearnedIndex
 import numpy as np
@@ -7,15 +7,14 @@ import numpy.typing as npt
 import pandas as pd
 from dataclasses import dataclass
 from testing.prepare_data import (
-    get_sisap23_data_normalized,
-    get_sisap23_queries_normalized,
-    get_sisap23_groundtruth_idxs,
-    get_sisap23_data,
-    get_sisap23_queries,
+    get_dataset,
+    get_dataset_normalized,
+    get_queries,
+    get_queries_normalized,
+    get_groundtruth_idxs,
 )
 import os
 import argparse
-from ast import literal_eval
 
 TEST_RESULTS_DIR = "./test_results"
 
@@ -24,7 +23,7 @@ TEST_RESULTS_DIR = "./test_results"
 class Data:
     navigation: npt.ArrayLike
     search: npt.ArrayLike
-    sketch: npt.ArrayLike
+    sketch: Optional[npt.ArrayLike]
 
 
 @dataclass
@@ -126,6 +125,8 @@ class NaiveTester(Tester):
     def __call__(
         self, data: Data, queries: Data, groundtruth: npt.ArrayLike
     ) -> pd.DataFrame:
+        assert data.sketch is not None and queries.sketch is not None
+
         # indexing from 1
         data_navigation = pd.DataFrame(data.navigation)
         data_navigation.index += 1
@@ -291,6 +292,7 @@ def main(
     bucket_type: str,
     n_buckets: List[int],
     k: int,
+    dataset: str,
     type_navigation: str,
     type_search: str,
     size: str,
@@ -347,16 +349,16 @@ def main(
     assert tester is not None
 
     data = Data(
-        get_sisap23_data_normalized(type_navigation, size),
-        get_sisap23_data_normalized(type_search, size),
-        get_sisap23_data("hammingv2", size),
+        get_dataset(dataset, type_navigation, size),
+        get_dataset_normalized(dataset, type_search, size),
+        get_dataset(dataset, "hammingv2", size) if dataset != "proteins" else None,
     )
     queries = Data(
-        get_sisap23_queries_normalized(type_navigation),
-        get_sisap23_queries_normalized(type_search),
-        get_sisap23_queries("hammingv2"),
+        get_queries(dataset, type_navigation),
+        get_queries_normalized(dataset, type_search),
+        get_queries(dataset, "hammingv2") if dataset != "proteins" else None,
     )
-    groundtruth = get_sisap23_groundtruth_idxs(size)
+    groundtruth = get_groundtruth_idxs(dataset, size)
 
     result = tester(data, queries, groundtruth)
     result_path = os.path.join(
@@ -384,9 +386,10 @@ if __name__ == "__main__":
     parser.add_argument("--type-navigation", default="pca32v2")
     parser.add_argument("--type-search", default="clip768v2")
     parser.add_argument(
-        "--size", default="100K", choices=["100K", "300K", "10M", "30M", "100M"]
+        "--size", default="100K", choices=["100K", "300K", "10M", "30M", "70M", "100M"]
     )
     parser.add_argument("--k", default=10, type=int)
+    parser.add_argument("--dataset", default="sisap23")
     parser.add_argument(
         "--load-path",
         default="./models/pca32v2-100K-ep=100,100-lr=0.01,0.01-cat=10,10-model=MLP,MLP-clustering_algorithm=faiss_kmeans,faiss_kmeans.pkl",
@@ -407,6 +410,7 @@ if __name__ == "__main__":
         args.bucket_type,
         args.n_buckets,
         args.k,
+        args.dataset,
         args.type_navigation,
         args.type_search,
         args.size,

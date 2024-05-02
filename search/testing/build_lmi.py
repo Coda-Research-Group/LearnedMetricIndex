@@ -5,7 +5,7 @@ import numpy.typing as npt
 from typing import Tuple, List, Dict, Any
 from li.utils import save_as_pickle, serialize
 import os
-from testing.prepare_data import get_sisap23_data_normalized
+from testing.prepare_data import get_dataset_normalized
 from li.clustering import algorithms
 import argparse
 import pandas as pd
@@ -60,6 +60,7 @@ def save_lmi(
 def main(
     type: str,
     size: str,
+    dataset: str,
     clustering_algorithms: List[str],
     epochs: List[int],
     model_type: List[str],
@@ -68,7 +69,7 @@ def main(
 ):
     LOG.setLevel(logging.DEBUG)
     LOG.info("Loading data")
-    data = get_sisap23_data_normalized(type, size)
+    data = get_dataset_normalized(dataset, type, size)
     n, d = data.shape
     LOG.info(f"Loaded data, shape: n={n}, d={d}")
 
@@ -123,8 +124,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--type", default="pca32v2")
     parser.add_argument(
-        "--size", default="100K", choices=["100K", "300K", "10M", "30M", "100M"]
+        "--size", default="100K", choices=["100K", "300K", "10M", "30M", "70M", "100M"]
     )
+    parser.add_argument("--dataset", default="sisap23")
     parser.add_argument("--epochs", nargs="+", default=[100], type=int)
     parser.add_argument("--model-type", nargs="+", default=["MLP"])
     parser.add_argument("--lr", nargs="+", default=[0.01], type=float)
@@ -142,6 +144,7 @@ if __name__ == "__main__":
     main(
         args.type,
         args.size,
+        args.dataset,
         args.clustering_algorithm,
         args.epochs,
         args.model_type,

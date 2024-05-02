@@ -126,21 +126,21 @@ def get_data_normalized(
     return normalize(get_data(dataset, part, type, size))
 
 
-def get_sisap23_queries(type: str) -> npt.ArrayLike:
-    return get_data("sisap23", "queries", type=type, size=None)
+def get_queries(dataset: str, type: str) -> npt.ArrayLike:
+    return get_data(dataset, "queries", type=type, size=None)
 
 
-def get_sisap23_queries_normalized(type: str) -> npt.ArrayLike:
-    return get_data_normalized("sisap23", "queries", type=type, size=None)
+def get_queries_normalized(dataset: str, type: str) -> npt.ArrayLike:
+    return get_data_normalized(dataset, "queries", type=type, size=None)
 
 
-def get_sisap23_data(type: str, size: str) -> npt.ArrayLike:
-    return get_data("sisap23", "data", type=type, size=size)
+def get_dataset(dataset: str, type: str, size: str) -> npt.ArrayLike:
+    return get_data(dataset, "data", type=type, size=size)
 
 
-def get_sisap23_data_normalized(type: str, size: str) -> npt.ArrayLike:
-    return get_data_normalized("sisap23", "data", type=type, size=size)
+def get_dataset_normalized(dataset: str, type: str, size: str) -> npt.ArrayLike:
+    return get_data_normalized(dataset, "data", type=type, size=size)
 
 
-def get_sisap23_groundtruth_idxs(size: str) -> npt.ArrayLike:
-    return get_data("sisap23", "groundtruth", type=None, size=size)
+def get_groundtruth_idxs(dataset: str, size: str) -> npt.ArrayLike:
+    return get_data(dataset, "groundtruth", type=None, size=size)
