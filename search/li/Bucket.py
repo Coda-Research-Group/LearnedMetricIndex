@@ -196,7 +196,7 @@ class IVFBucketFaiss(Bucket):
         no, d = data.shape
         s = time.time()
         quantizer = faiss.IndexFlatIP(d)
-        self.data = faiss.IndexIVFFlat(quantizer, d, nlist)
+        self.data = faiss.IndexIVFFlat(quantizer, d, nlist, faiss.METRIC_INNER_PRODUCT)
         self.data.train(data)
 
         return time.time() - s
@@ -231,11 +231,12 @@ class IVFBucketFaiss(Bucket):
         self.data.nprobe = nprobe
 
         s = time.time()
-        distances, indices = self.data.search(
+        similarity, indices = self.data.search(
             queries,
             k,
         )
         t_search = time.time() - s
+        distances = 1 - similarity
 
         return indices, distances, t_search, np.NINF
 
