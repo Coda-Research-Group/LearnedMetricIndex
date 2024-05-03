@@ -90,7 +90,7 @@ class IVFTester(Tester):
                         self.dynamic,
                         nprobe=nprobe,
                     )
-                    recall = get_recall(nns, groundtruth, self.k)
+                    recall = get_recall(nns, groundtruth)
                     results.append(
                         [
                             n_buckets,
@@ -150,7 +150,7 @@ class NaiveTester(Tester):
                 self.k,
                 self.naive_order,
             )
-            recall = get_recall(nns, groundtruth, self.k)
+            recall = get_recall(nns, groundtruth)
             results.append(
                 [
                     n_buckets,
@@ -200,7 +200,7 @@ class NoBucketsTester(Tester):
                 n_buckets,
                 self.k,
             )
-            recall = get_recall(nns, groundtruth, self.k)
+            recall = get_recall(nns, groundtruth)
             results.append(
                 [
                     n_buckets,
@@ -269,7 +269,7 @@ class SketchTester(Tester):
                     c=c,
                     queries_sketch=queries.sketch,
                 )
-                recall = get_recall(nns, groundtruth, self.k)
+                recall = get_recall(nns, groundtruth)
                 results.append(
                     [
                         n_buckets,
@@ -303,15 +303,16 @@ def load_lmi(
     return load_from_pickle(path)
 
 
-def get_recall(I, gt, k):
-    assert k <= I.shape[1]
-    assert len(I) == len(gt)
+def get_recall(results: npt.NDArray[np.int64], groundtruth: npt.NDArray[np.int64]):
+    no, k = results.shape
+    no_g, k_g = groundtruth.shape
+    assert no == no_g
+    assert k <= k_g
 
-    n = len(I)
-    recall = 0
-    for i in range(n):
-        recall += len(set(I[i, :k]) & set(gt[i, :k]))
-    return recall / (n * k)
+    recall = 0.
+    for i in range(no):
+        recall += len(set(results[i, :k]) & set(groundtruth[i, :k]))
+    return recall / (no * k)
 
 
 def format_filename(
