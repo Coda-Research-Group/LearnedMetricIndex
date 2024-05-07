@@ -36,6 +36,7 @@ class Tester:
     k: int
     naive_order: bool
     dynamic: bool
+    overflow: bool
 
     def __call__(
         self, data: Data, queries: Data, groundtruth: npt.ArrayLike
@@ -88,6 +89,7 @@ class IVFTester(Tester):
                         self.k,
                         self.naive_order,
                         self.dynamic,
+                        self.overflow,
                         nprobe=nprobe,
                     )
                     recall = get_recall(nns, groundtruth)
@@ -266,6 +268,7 @@ class SketchTester(Tester):
                     self.k,
                     self.naive_order,
                     self.dynamic,
+                    self.overflow,
                     c=c,
                     queries_sketch=queries.sketch,
                 )
@@ -323,6 +326,7 @@ def format_filename(
     k: int,
     naive_priority_queue: bool,
     dynamic: bool,
+    overflow: bool,
 ) -> str:
     return (
         f"nav={type_navigation}_"
@@ -331,7 +335,8 @@ def format_filename(
         f"bucket={bucket_type}_"
         f"k={k}_"
         f"naive-pq={naive_priority_queue}_"
-        f"dynamic={dynamic}"
+        f"dynamic={dynamic}_"
+        f"overflow={overflow}"
         ".csv"
     )
 
@@ -347,6 +352,7 @@ def main(
     size: str,
     naive_priority_queue: bool,
     dynamic: bool,
+    overflow: bool,
     append_results: bool,
     **kwargs,
 ) -> None:
@@ -365,6 +371,7 @@ def main(
             k,
             naive_priority_queue,
             dynamic,
+            overflow,
         )
     if bucket_type == "none":
         tester = NoBucketsTester(
@@ -376,6 +383,7 @@ def main(
             k,
             naive_priority_queue,
             dynamic,
+            overflow,
         )
     elif bucket_type in ["IVF", "IVFFaiss"]:
         count_dc = bucket_type == "IVF"
@@ -388,6 +396,7 @@ def main(
             k,
             naive_priority_queue,
             dynamic,
+            overflow,
             kwargs["nlist"],
             kwargs["nprobe"],
             count_dc,
@@ -403,6 +412,7 @@ def main(
             k,
             naive_priority_queue,
             dynamic,
+            overflow,
             kwargs["c"],
         )
     else:
@@ -432,6 +442,7 @@ def main(
             k,
             naive_priority_queue,
             dynamic,
+            overflow,
         ),
     )
 
@@ -457,6 +468,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--naive-priority-queue", action="store_true")
     parser.add_argument("--dynamic", action="store_true")
+    parser.add_argument("--overflow", action="store_true")
     parser.add_argument("--bucket-type", default="IVF")
     parser.add_argument("--n-buckets", nargs="+", default=[50], type=int)
     parser.add_argument("--nlist", nargs="+", default=[50], type=int)
@@ -477,6 +489,7 @@ if __name__ == "__main__":
         args.size,
         args.naive_priority_queue,
         args.dynamic,
+        args.overflow,
         args.append_results,
         nlist=args.nlist,
         nprobe=args.nprobe,
