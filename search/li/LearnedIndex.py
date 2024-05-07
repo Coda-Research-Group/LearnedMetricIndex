@@ -252,6 +252,7 @@ class LearnedIndex(Logger):
         k: int = 10,
         naive_order: bool = True,
         dynamic: bool = False,
+        overflow: bool = False,
         **kwargs,
     ) -> Tuple[npt.NDArray, npt.NDArray[np.uint32], Dict[str, float]]:
         """Searches for `k` nearest neighbors for each query in `queries`.
@@ -306,6 +307,7 @@ class LearnedIndex(Logger):
             k,
             naive_order,
             dynamic,
+            overflow,
             **kwargs,
         )
 
@@ -322,6 +324,7 @@ class LearnedIndex(Logger):
         k: int = 10,
         naive_order: bool = True,
         dynamic: bool = True,
+        overflow: bool = False,
         **kwargs,
     ) -> Tuple[npt.NDArray, npt.NDArray[np.uint32], Dict[str, float]]:
         if not built_buckets:
@@ -350,7 +353,7 @@ class LearnedIndex(Logger):
         bucket_weights = None
         if dynamic:
             # uses L2
-            bucket_weights = normalize(bucket_probability, norm='l1')
+            bucket_weights = normalize(bucket_probability, norm="l1")
         else:
             bucket_weights = np.full(
                 bucket_probability.shape, 1 / bucket_probability.shape[1]
@@ -372,10 +375,12 @@ class LearnedIndex(Logger):
         for bucket_order_idx in range(n_buckets):
             subclusters_to_search = None
             if dynamic:
-                subclusters_to_search = (remaining_subclusters * bucket_weights[:, 0]).astype(np.uint32)
+                subclusters_to_search = (
+                    remaining_subclusters * bucket_weights[:, 0]
+                ).astype(np.uint32)
                 new_weights = bucket_weights[:, 1:]
                 if new_weights.shape[1] > 0:
-                    new_weights = normalize(new_weights, norm='l1')
+                    new_weights = normalize(new_weights, norm="l1")
                 bucket_weights = new_weights
 
             self.logger.debug(
@@ -396,7 +401,9 @@ class LearnedIndex(Logger):
             )
 
             if dynamic:
-                remaining_subclusters -= subclusters_searched
+                remaining_subclusters -= (
+                    subclusters_searched if overflow else subclusters_to_search
+                )
 
             measured_time["search_within_buckets"] += t_all
             measured_time["seq_search"] += t_seq_search
@@ -685,7 +692,9 @@ class LearnedIndex(Logger):
                 )
 
                 if subclusters_to_search is not None:
-                    subclusters_for_this_bucket = subclusters_to_search[relevant_query_idxs]
+                    subclusters_for_this_bucket = subclusters_to_search[
+                        relevant_query_idxs
+                    ]
                     indices, distances, t_search, n_dis, subclusters_searched_q = (
                         bucket.search_with_subcluster_no(
                             queries_for_this_bucket,
