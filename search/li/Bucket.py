@@ -168,6 +168,14 @@ class IVFBucket(Bucket):
         nprobe = min(nprobe, self.data.nlist)
         self.subset_parameter = nprobe
 
+        if nprobe < 1:
+            return (
+                np.full((len(queries), k), -1),
+                np.full((len(queries), k), np.NINF),
+                0.0,
+                0,
+            )
+
         self.data.nprobe = nprobe
 
         s = time.time()
@@ -227,6 +235,14 @@ class IVFBucketFaiss(Bucket):
         nprobe = self.subset_parameter
         nprobe = min(nprobe, self.data.nlist)
         self.subset_parameter = nprobe
+
+        if nprobe < 1:
+            return (
+                np.full((len(queries), k), -1),
+                np.full((len(queries), k), np.NINF),
+                0.0,
+                0,
+            )
 
         self.data.nprobe = nprobe
 
@@ -291,6 +307,14 @@ class SketchBucket(Bucket):
         c = self.subset_parameter
         c = min(c, len(self.data))
         self.subset_parameter = c
+
+        if c < 1:
+            return (
+                np.full((len(queries), k), -1),
+                np.full((len(queries), k), np.NINF),
+                0.0,
+                0,
+            )
 
         s_t = time.time()
         sketch_distances, sketch_indices = self.sketch_index.search(

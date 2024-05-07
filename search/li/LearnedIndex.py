@@ -292,8 +292,7 @@ class LearnedIndex(Logger):
         assert self.bucket_models is not None
 
         if dynamic:
-            kwargs["nprobe"] = kwargs.get("nprobe", 0) * n_buckets
-            kwargs["c"] = kwargs.get("c", 0) * n_buckets
+            kwargs[self.subcluster_parameter_name] *= n_buckets
 
         return self._search_impl(
             None,
@@ -352,7 +351,6 @@ class LearnedIndex(Logger):
 
         bucket_weights = None
         if dynamic:
-            # uses L2
             bucket_weights = normalize(bucket_probability, norm="l1")
         else:
             bucket_weights = np.full(
