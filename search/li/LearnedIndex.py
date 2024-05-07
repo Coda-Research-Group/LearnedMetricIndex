@@ -290,6 +290,10 @@ class LearnedIndex(Logger):
         """
         assert self.bucket_models is not None
 
+        if dynamic:
+            kwargs["nprobe"] = kwargs.get("nprobe", 0) * n_buckets
+            kwargs["c"] = kwargs.get("c", 0) * n_buckets
+
         return self._search_impl(
             None,
             queries_navigation,
