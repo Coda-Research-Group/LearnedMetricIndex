@@ -31,12 +31,12 @@ class Bucket:
 
     def search(
         self, queries: npt.NDArray[np.float32], k: int, **kwargs
-    ) -> Tuple[npt.NDArray[np.int32], npt.NDArray[np.float32], float, int]:
+    ) -> Tuple[npt.NDArray[np.int32], npt.NDArray[np.float32], float, int, float, int]:
         raise NotImplementedError()
 
     def _search_impl(
         self, queries: npt.NDArray[np.float32], k: int, **kwargs
-    ) -> Tuple[npt.NDArray[np.int32], npt.NDArray[np.float32], float, int]:
+    ) -> Tuple[npt.NDArray[np.int32], npt.NDArray[np.float32], float, int, float, int]:
         raise NotImplementedError()
 
     def search_with_subcluster_no(
@@ -50,6 +50,8 @@ class Bucket:
         npt.NDArray[np.float32],
         float,
         int,
+        float,
+        int,
         npt.NDArray[np.uint32],
     ]:
         assert len(queries) == len(subclusters_to_search)
@@ -58,6 +60,8 @@ class Bucket:
         distances = np.empty((len(queries), k))
         t_search = 0.0
         distance_computations = 0
+        t_sketch = 0.0
+        distance_computations_sketch = 0
         subclusters_searched = np.empty(len(queries), dtype=np.int32)
         sketches = kwargs.get("sketches", None)
 
@@ -68,17 +72,30 @@ class Bucket:
             if sketches is not None:
                 kwargs["sketches"] = sketches[query_indices]
 
-            ind, dis, t, dc = self._search_impl(queries[query_indices], k, **kwargs)
+            ind, dis, t, dc, t_sk, dc_sketch = self._search_impl(
+                queries[query_indices], k, **kwargs
+            )
 
             indices[query_indices] = ind
             distances[query_indices] = dis
             t_search += t
             distance_computations += dc
+            t_sketch += t_sk
+            distance_computations_sketch += dc_sketch
+
             subclusters_searched[query_indices] = self.subset_parameter
 
         kwargs["sketches"] = sketches
 
-        return indices, distances, t_search, distance_computations, subclusters_searched
+        return (
+            indices,
+            distances,
+            t_search,
+            distance_computations,
+            t_sketch,
+            distance_computations_sketch,
+            subclusters_searched,
+        )
 
 
 class NaiveBucket(Bucket):
@@ -121,7 +138,7 @@ class NaiveBucket(Bucket):
 
         distances = 1 - similarity  # similarity is not distance
 
-        return indices, distances, t_search, len(queries) * len(self.data)
+        return indices, distances, t_search, len(queries) * len(self.data), 0.0, 0
 
 
 class IVFBucket(Bucket):
@@ -155,13 +172,13 @@ class IVFBucket(Bucket):
 
     def search(
         self, queries: npt.NDArray[np.float32], k: int, **kwargs
-    ) -> Tuple[npt.NDArray[np.int32], npt.NDArray[np.float32], float, int]:
+    ) -> Tuple[npt.NDArray[np.int32], npt.NDArray[np.float32], float, int, float, int]:
         self.subset_parameter = kwargs.get("nprobe", 5)
         return self._search_impl(queries, k, **kwargs)
 
     def _search_impl(
         self, queries: npt.NDArray[np.float32], k: int, **kwargs
-    ) -> Tuple[npt.NDArray[np.int32], npt.NDArray[np.float32], float, int]:
+    ) -> Tuple[npt.NDArray[np.int32], npt.NDArray[np.float32], float, int, float, int]:
         assert self.data is not None and self.data.trained
 
         nprobe = self.subset_parameter
@@ -191,6 +208,8 @@ class IVFBucket(Bucket):
             distances,
             t_search,
             self.data.distance_computer.distance_computations - dc,
+            0.0,
+            0,
         )
 
 
@@ -224,13 +243,13 @@ class IVFBucketFaiss(Bucket):
 
     def search(
         self, queries: npt.NDArray[np.float32], k: int, **kwargs
-    ) -> Tuple[npt.NDArray[np.int32], npt.NDArray[np.float32], float, int]:
+    ) -> Tuple[npt.NDArray[np.int32], npt.NDArray[np.float32], float, int, float, int]:
         self.subset_parameter = kwargs.get("nprobe", 5)
         return self._search_impl(queries, k, **kwargs)
 
     def _search_impl(
         self, queries: npt.NDArray[np.float32], k: int, **kwargs
-    ) -> Tuple[npt.NDArray[np.float32], npt.NDArray[np.int32], float, int]:
+    ) -> Tuple[npt.NDArray[np.float32], npt.NDArray[np.int32], float, int, float, int]:
         assert self.data is not None
         nprobe = self.subset_parameter
         nprobe = min(nprobe, self.data.nlist)
@@ -254,7 +273,7 @@ class IVFBucketFaiss(Bucket):
         t_search = time.time() - s
         distances = 1 - similarity
 
-        return indices, distances, t_search, np.NINF
+        return indices, distances, t_search, np.NINF, 0.0, 0
 
 
 class SketchBucket(Bucket):
@@ -291,13 +310,13 @@ class SketchBucket(Bucket):
 
     def search(
         self, queries: npt.NDArray[np.float32], k: int, **kwargs
-    ) -> Tuple[npt.NDArray[np.int32], npt.NDArray[np.float32], float, int]:
+    ) -> Tuple[npt.NDArray[np.int32], npt.NDArray[np.float32], float, int, float, int]:
         self.subset_parameter = kwargs.get("c", k * 10)
         return self._search_impl(queries, k, **kwargs)
 
     def _search_impl(
         self, queries: npt.NDArray[np.float32], k: int, **kwargs
-    ) -> Tuple[npt.NDArray[np.int32], npt.NDArray[np.float32], float, int]:
+    ) -> Tuple[npt.NDArray[np.int32], npt.NDArray[np.float32], float, int, float, int]:
         sketches = kwargs.get("sketches", None)
         assert self.data is not None
         assert self.sketch_index is not None
@@ -316,15 +335,17 @@ class SketchBucket(Bucket):
                 0,
             )
 
-        s_t = time.time()
+        s_t_sketch = time.time()
         sketch_distances, sketch_indices = self.sketch_index.search(
             sketches,
             c,
         )
+        t_sketch = time.time() - s_t_sketch
 
         dc = 0
         sim = []
         ind = []
+        s_t = time.time()
 
         for query_idx, query in enumerate(queries):
             s, i = faiss.knn(
@@ -345,4 +366,11 @@ class SketchBucket(Bucket):
 
         distances = 1 - similarity
 
-        return indices, distances, t_search, dc
+        return (
+            indices,
+            distances,
+            t_search,
+            dc,
+            t_sketch,
+            len(queries) * self.sketch_index.ntotal,
+        )

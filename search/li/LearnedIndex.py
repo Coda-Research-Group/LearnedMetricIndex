@@ -384,18 +384,26 @@ class LearnedIndex(Logger):
             self.logger.debug(
                 f"Searching in bucket {bucket_order_idx + 1} out of {n_buckets}"
             )
-            (dists, anns, t_all, t_seq_search, t_sort, n_dis, subclusters_searched) = (
-                self._search_single_bucket(
-                    data_navigation=data_navigation,
-                    data_search=data_search,
-                    queries_search=queries_search,
-                    bucket_path=bucket_order[:, bucket_order_idx, :],
-                    built_buckets=built_buckets,
-                    subclusters_to_search=subclusters_to_search,
-                    n_levels=n_levels,
-                    k=k,
-                    **kwargs,
-                )
+            (
+                dists,
+                anns,
+                t_all,
+                t_seq_search,
+                t_sort,
+                n_dis,
+                t_seq_sketch,
+                n_dis_sketch,
+                subclusters_searched,
+            ) = self._search_single_bucket(
+                data_navigation=data_navigation,
+                data_search=data_search,
+                queries_search=queries_search,
+                bucket_path=bucket_order[:, bucket_order_idx, :],
+                built_buckets=built_buckets,
+                subclusters_to_search=subclusters_to_search,
+                n_levels=n_levels,
+                k=k,
+                **kwargs,
             )
 
             if dynamic:
@@ -407,6 +415,8 @@ class LearnedIndex(Logger):
             measured_time["seq_search"] += t_seq_search
             measured_time["sort"] += t_sort
             measured_time["distance_computations"] += n_dis
+            measured_time["sketch_search"] += t_seq_sketch
+            measured_time["distance_computations_sketches"] += n_dis_sketch
 
             self.logger.debug("Sorting the results")
             t = time.time()
@@ -651,7 +661,17 @@ class LearnedIndex(Logger):
         k: int = 10,
         n_levels: int = 1,
         **kwargs,
-    ) -> Tuple[npt.NDArray, npt.NDArray[np.uint32], float, float, float, int]:
+    ) -> Tuple[
+        npt.NDArray,
+        npt.NDArray[np.uint32],
+        float,
+        float,
+        float,
+        int,
+        float,
+        int,
+        npt.NDArray[np.uint32],
+    ]:
         s_all = time.time()
 
         n_queries = queries_search.shape[0]
@@ -665,8 +685,10 @@ class LearnedIndex(Logger):
             ]
 
         t_seq_search = 0.0
+        t_seq_sketch = 0.0
         t_sort = 0.0
         n_dis_total = 0
+        n_dis_sketch_total = 0
 
         subclusters_searched = None
 
@@ -693,27 +715,37 @@ class LearnedIndex(Logger):
                     subclusters_for_this_bucket = subclusters_to_search[
                         relevant_query_idxs
                     ]
-                    indices, distances, t_search, n_dis, subclusters_searched_q = (
-                        bucket.search_with_subcluster_no(
-                            queries_for_this_bucket,
-                            k,
-                            subclusters_for_this_bucket,
-                            **kwargs,
-                            sketches=relevant_sketches,
-                        )
+                    (
+                        indices,
+                        distances,
+                        t_search,
+                        n_dis,
+                        t_sketch,
+                        n_dis_sketch,
+                        subclusters_searched_q,
+                    ) = bucket.search_with_subcluster_no(
+                        queries_for_this_bucket,
+                        k,
+                        subclusters_for_this_bucket,
+                        **kwargs,
+                        sketches=relevant_sketches,
                     )
 
                     subclusters_searched[relevant_query_idxs] = subclusters_searched_q
 
                 else:
-                    indices, distances, t_search, n_dis = bucket.search(
-                        queries_for_this_bucket,
-                        k,
-                        **kwargs,
-                        sketches=relevant_sketches,
+                    indices, distances, t_search, n_dis, t_sketch, n_dis_sketch = (
+                        bucket.search(
+                            queries_for_this_bucket,
+                            k,
+                            **kwargs,
+                            sketches=relevant_sketches,
+                        )
                     )
                 t_seq_search += t_search
                 n_dis_total += n_dis
+                t_seq_sketch += t_sketch
+                n_dis_sketch_total += n_dis_sketch
 
                 # return indexes to original dataset
                 nns[relevant_query_idxs] = bucket.original_idxs[indices]
@@ -756,5 +788,7 @@ class LearnedIndex(Logger):
             t_seq_search,
             t_sort,
             n_dis_total,
+            t_seq_sketch,
+            n_dis_sketch_total,
             subclusters_searched,
         )
