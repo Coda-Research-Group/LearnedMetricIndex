@@ -191,6 +191,8 @@ class IVFBucket(Bucket):
                 np.full((len(queries), k), np.NINF),
                 0.0,
                 0,
+                0.0,
+                0,
             )
 
         self.data.nprobe = nprobe
@@ -259,6 +261,8 @@ class IVFBucketFaiss(Bucket):
             return (
                 np.full((len(queries), k), -1),
                 np.full((len(queries), k), np.NINF),
+                0.0,
+                0,
                 0.0,
                 0,
             )
@@ -331,6 +335,8 @@ class SketchBucket(Bucket):
             return (
                 np.full((len(queries), k), -1),
                 np.full((len(queries), k), np.NINF),
+                0.0,
+                0,
                 0.0,
                 0,
             )
