@@ -86,7 +86,8 @@ class LearnedIndex(Logger):
         bucket_models = {} if mode in ["build", "train"] else self.bucket_models
         assert bucket_models is not None
 
-        total_time = 0.0
+        t_s = time.time()
+        build_time_only = 0.0
 
         for path, g in data_navigation.groupby(possible_bucket_paths):
             bucket_obj_indexes = g.index.to_numpy()
@@ -99,24 +100,26 @@ class LearnedIndex(Logger):
 
             if mode == "build":
                 bucket = bucket_type()
-                total_time += bucket.build(
+                build_time_only += bucket.build(
                     data_for_this_bucket, bucket_obj_indexes, **kwargs
                 )
                 bucket_models[path] = bucket
 
             elif mode == "train":
                 bucket = bucket_type()
-                total_time += bucket.train(data_for_this_bucket, **kwargs)
+                build_time_only += bucket.train(data_for_this_bucket, **kwargs)
                 bucket_models[path] = bucket
 
             elif mode == "add":
                 bucket = bucket_models[path]
-                total_time += bucket.add(
+                build_time_only += bucket.add(
                     data_for_this_bucket, bucket_obj_indexes, **kwargs
                 )
 
             else:
                 assert False
+
+        total_time = time.time() - t_s
 
         self.bucket_models = bucket_models
 
@@ -373,7 +376,7 @@ class LearnedIndex(Logger):
         for bucket_order_idx in range(n_buckets):
             subclusters_to_search = None
             if dynamic:
-                subclusters_to_search = (
+                subclusters_to_search = np.ceil(
                     remaining_subclusters * bucket_weights[:, 0]
                 ).astype(np.uint32)
                 new_weights = bucket_weights[:, 1:]
