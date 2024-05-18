@@ -188,7 +188,7 @@ class IVFBucket(Bucket):
         if nprobe < 1:
             return (
                 np.full((len(queries), k), -1),
-                np.full((len(queries), k), np.NINF),
+                np.full((len(queries), k), np.inf),
                 0.0,
                 0,
                 0.0,
@@ -260,7 +260,7 @@ class IVFBucketFaiss(Bucket):
         if nprobe < 1:
             return (
                 np.full((len(queries), k), -1),
-                np.full((len(queries), k), np.NINF),
+                np.full((len(queries), k), np.inf),
                 0.0,
                 0,
                 0.0,
@@ -334,7 +334,7 @@ class SketchBucket(Bucket):
         if c < 1:
             return (
                 np.full((len(queries), k), -1),
-                np.full((len(queries), k), np.NINF),
+                np.full((len(queries), k), np.inf),
                 0.0,
                 0,
                 0.0,
