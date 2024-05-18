@@ -1,11 +1,10 @@
-from li.clustering.scikit_kmeans import cluster
 import numpy.typing as npt
 from typing import Optional, Tuple, List
 import numpy as np
-from sklearn.cluster import KMeans
 from logging import DEBUG
 from li.Logger import Logger
 from li.utils import log_runtime
+import faiss
 
 Vector = npt.NDArray[np.float32]
 VectorMatrix = npt.NDArray[np.float32]
@@ -39,7 +38,6 @@ class InvertedFileIndex(Logger):
     nlist: int
     distance_computer: DistanceComputer
     nprobe: int = 5
-    kmeans: Optional[KMeans] = None
     data: Optional[VectorMatrix] = None
     cells: Optional[List[IndexArray]] = None
     centroids: Optional[VectorMatrix] = None
@@ -56,22 +54,15 @@ class InvertedFileIndex(Logger):
         self.distance_computer = distance_computer
 
     def train(self, data: VectorMatrix) -> None:
-        self.kmeans, _ = cluster(
-            data,
-            self.nlist,
-            parameters={
-                "verbose": 0,
-                "random_state": None,
-                "init": "random",
-                "max_iter": 25,
-                "n_init": 1,
-            },
-        )
-        self.centroids = self.kmeans.cluster_centers_
+        quantizer = faiss.IndexFlatIP(self.d)
+        idx = faiss.IndexIVFFlat(quantizer, self.d, self.nlist, faiss.METRIC_INNER_PRODUCT)
+        idx.train(data)
+        self.centroids = idx.quantizer.reconstruct_n(0, self.nlist)
         self.trained = True
 
     def add(self, data: VectorMatrix) -> None:
-        labels = self.kmeans.predict(data)
+        _, labels = faiss.knn(data, self.centroids, k=1, metric=faiss.METRIC_INNER_PRODUCT)
+        labels = labels.squeeze()
         cells = [np.arange(len(data))[labels == label] for label in range(self.nlist)]
         self.cells = cells
         self.data = data
