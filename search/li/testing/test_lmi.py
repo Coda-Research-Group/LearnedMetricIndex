@@ -6,7 +6,7 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 from dataclasses import dataclass
-from testing.prepare_data import (
+from li.testing.prepare_data import (
     get_dataset,
     get_dataset_normalized,
     get_queries,

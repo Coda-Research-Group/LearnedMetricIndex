@@ -5,7 +5,7 @@ import numpy.typing as npt
 from typing import Tuple, List, Dict, Any
 from li.utils import save_as_pickle, serialize
 import os
-from testing.prepare_data import get_dataset_normalized
+from li.testing.prepare_data import get_dataset_normalized
 from li.clustering import algorithms
 import argparse
 import pandas as pd

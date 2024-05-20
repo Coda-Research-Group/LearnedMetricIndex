@@ -1,9 +1,8 @@
 import numpy as np
 import numpy.typing as npt
-import pandas as pd
 import time
 
-from li.inverted_file import InvertedFileIndex
+from li.filtering.InvertedFileIndex import InvertedFileIndex
 from typing import Tuple, Any, Optional
 import faiss
 

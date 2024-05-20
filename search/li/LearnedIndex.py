@@ -13,7 +13,7 @@ from li.Logger import Logger
 from li.model import NeuralNetwork, data_X_to_torch
 from li.PriorityQueue import EMPTY_VALUE, PriorityQueue
 from li.utils import filter_path_idxs, log_runtime
-from li.Bucket import Bucket, NaiveBucket, IVFBucket, IVFBucketFaiss, SketchBucket
+from li.filtering.Bucket import Bucket, NaiveBucket, IVFBucket, IVFBucketFaiss, SketchBucket
 from tqdm import tqdm
 from sklearn.preprocessing import normalize
 
