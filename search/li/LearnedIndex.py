@@ -718,6 +718,11 @@ class LearnedIndex(Logger):
         int,
         npt.NDArray[np.uint32],
     ]:
+        """
+        Modified by
+        ------
+        Jan Mach
+        """
         s_all = time.time()
 
         n_queries = queries_search.shape[0]
