@@ -302,6 +302,8 @@ class LearnedIndex(Logger):
             Whether parent node probabilities are considered in the priority queue, by default True
         dynamic : bool, optional
             Whether number of searched subclusters is dependent on bucket's probability, by default True
+        overflow: bool, optional
+            Whether subclusters not searched in a bucket are searched in the next bucket in order, by default False
         kwargs :
             Kwargs for the buckets.
 
