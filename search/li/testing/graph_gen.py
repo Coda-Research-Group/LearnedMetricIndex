@@ -55,7 +55,7 @@ def plot_dc_recall(
         x_label="Distance computations performed",
         y="recall",
         y_label="Recall",
-        title="LMI distance computations vs. recall\nPROTEINS 30M subset",
+        title="LMI distance computations vs. recall\LAION2B 10M subset",
         filename=filename,
         hue=hue,
     )
@@ -70,7 +70,7 @@ def plot_search_recall(
         x_label="Search time (seconds)",
         y="recall",
         y_label="Recall",
-        title="LMI distance computations vs. recall\nPROTEINS 30M subset",
+        title="LMI distance computations vs. recall\LAION2B 10M subset",
         filename=filename,
         hue=hue,
     )
@@ -188,6 +188,21 @@ def best_plot(
         [
             with_type(filter_values(df, filter), type)
             for (type, (df, filter)) in dict.items()
+        ]
+    )
+    best = filter_values(best, filter)
+    print(best)
+    type_plot(best, type_name, hue="type")
+
+def best_plot_param(
+    dict: Dict[str, Tuple[pd.DataFrame, Dict[str, Interval]]],
+    filter: Dict[str, Interval] = {},
+    type_name: str = "best",
+) -> None:
+    best = pd.concat(
+        [
+            with_type(filter_values(df, fltr), f"{type}, {list(fltr.keys())[0]} = {list(fltr.values())[0].lower}")
+            for (type, (df, fltr)) in dict.items()
         ]
     )
     best = filter_values(best, filter)
@@ -368,8 +383,8 @@ compare_sketches = [
 ]
 best_final = ["ivf", "ivf (a-u-n)", "sketch", "sketch (a-u-n)", "baseline"]
 
-best_plot({key: best_dict[key] for key in compare_ivf}, {}, type_name="best_ivf")
-best_plot(
+best_plot_param({key: best_dict[key] for key in compare_ivf}, {}, type_name="best_ivf")
+best_plot_param(
     {key: best_dict[key] for key in compare_sketches}, {}, type_name="best_sketch"
 )
 best_plot(

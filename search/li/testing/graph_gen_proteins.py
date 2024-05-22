@@ -121,6 +121,21 @@ def best_plot(dict: Dict[str, Tuple[pd.DataFrame, Dict[str, Interval]]], filter:
     best = filter_values(best, filter)
     type_plot(best, type_name, hue="type")
 
+def best_plot_param(
+    dict: Dict[str, Tuple[pd.DataFrame, Dict[str, Interval]]],
+    filter: Dict[str, Interval] = {},
+    type_name: str = "best",
+) -> None:
+    best = pd.concat(
+        [
+            with_type(filter_values(df, fltr), f"{type}, {list(fltr.keys())[0]} = {list(fltr.values())[0].lower}")
+            for (type, (df, fltr)) in dict.items()
+        ]
+    )
+    best = filter_values(best, filter)
+    print(best)
+    type_plot(best, type_name, hue="type")
+
 best_dict: Dict[str, Tuple[pd.DataFrame, Dict[str, Interval]]] = {}
 
 ## NO BUCKETS
@@ -207,6 +222,6 @@ best_dict["ivf (a-i-d)"] = (data_ivf_dynamic, {"nprobe": Interval(6, 6)})
 compare_techniques = ["ivf", "ivf (a-u-n)", "ivf (a-u-d)", "ivf (a-i-n)", "ivf (a-i-d)"]
 best_final = ["ivf", "ivf (a-u-n)", "ivf (a-i-n)", "baseline"]
 
-best_plot({key: best_dict[key] for key in compare_techniques}, {"recall": Interval(0.86, 0.94)}, type_name="best_technique")
+best_plot_param({key: best_dict[key] for key in compare_techniques}, {"recall": Interval(0.86, 0.94)}, type_name="best_technique")
 best_plot({key: best_dict[key] for key in best_final}, {"distance_computations": Interval(None, 10_000_000_000), "recall": Interval(0.86, 0.94)})
 

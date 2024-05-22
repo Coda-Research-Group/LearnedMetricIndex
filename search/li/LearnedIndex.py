@@ -59,6 +59,11 @@ class LearnedIndex(Logger):
         mode: str,
         **kwargs,
     ) -> float:
+        """
+        Author
+        ------
+        Jan Mach
+        """
         bucket_type = None
         if bucket_type_name == "naive":
             bucket_type = NaiveBucket
@@ -138,6 +143,11 @@ class LearnedIndex(Logger):
         bucket_type_name: str = "naive",
         **kwargs,
     ) -> float:
+        """
+        Author
+        ------
+        Jan Mach
+        """
         return self._create_buckets(
             data_navigation,
             data_search,
@@ -158,6 +168,11 @@ class LearnedIndex(Logger):
         bucket_type_name: str = "naive",
         **kwargs,
     ) -> float:
+        """
+        Author
+        ------
+        Jan Mach
+        """
         return self._create_buckets(
             data_navigation,
             data_search,
@@ -178,6 +193,11 @@ class LearnedIndex(Logger):
         bucket_type_name: str = "naive",
         **kwargs,
     ) -> float:
+        """
+        Author
+        ------
+        Jan Mach
+        """
         return self._create_buckets(
             data_navigation,
             data_search,
@@ -291,6 +311,10 @@ class LearnedIndex(Logger):
             Array of shape (queries_search.shape[0], k) with distances to nearest neighbors for each query,
             array of shape (queries_search.shape[0], k) with nearest neighbors for each query,
             dictionary with measured times.
+
+        Author
+        ------
+        Jan Mach
         """
         assert self.bucket_models is not None
 
@@ -329,6 +353,11 @@ class LearnedIndex(Logger):
         overflow: bool = False,
         **kwargs,
     ) -> Tuple[npt.NDArray, npt.NDArray[np.uint32], Dict[str, float]]:
+        """
+        Modified by
+        ------
+        Jan Mach
+        """
         if not built_buckets:
             assert data_navigation is not None
             assert data_search is not None
@@ -495,6 +524,10 @@ class LearnedIndex(Logger):
             Array of shape (queries_navigation.shape[0], n_buckets, len(n_categories))
             with the order in which the queries visit the buckets,
             total inference time.
+
+        Modified by
+        ------
+        Jan Mach
         """
 
         n_queries = queries_navigation.shape[0]
@@ -579,6 +612,10 @@ class LearnedIndex(Logger):
         Visits the internal nodes specified by `paths`.
         Paths to the buckets under a specific internal node are then added into `pq`.
         Done for each possible path to an internal node separately.
+
+        Modified by
+        ------
+        Jan Mach
         """
         total_inference_t = 0.0
 
@@ -636,6 +673,10 @@ class LearnedIndex(Logger):
         The path to the bucket relevant to each query is then stored in `bucket_order`.
         The probability of each bucket is then stored in `bucket_probabilities`.
         Done for each possible bucket separately.
+
+        Modified by
+        ------
+        Jan Mach
         """
         for path in self.bucket_paths:
             path_idxs = filter_path_idxs(path_to_visit, path)
@@ -675,6 +716,11 @@ class LearnedIndex(Logger):
         int,
         npt.NDArray[np.uint32],
     ]:
+        """
+        Modified by
+        ------
+        Jan Mach
+        """
         s_all = time.time()
 
         n_queries = queries_search.shape[0]
