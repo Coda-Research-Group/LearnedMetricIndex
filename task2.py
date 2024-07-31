@@ -347,7 +347,11 @@ def task2(
 
     k = 30
 
-    for nprobe in [1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 80, 90, 100]:
+    nprobes = [1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 80, 90, 100]
+    if dataset_size == '300K':
+        nprobes = [1]
+
+    for nprobe in nprobes:
         start = time.time()
         D, I = lmi.search(queries, decomposed_queries, k, nprobe, ncandidates)
         searchtime = time.time() - start

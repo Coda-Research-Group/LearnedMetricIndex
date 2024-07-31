@@ -286,7 +286,11 @@ def task1(
 
     k = 30
 
-    for nprobe in range(1, 30 + 1):
+    nprobes = range(1, 30 + 1)
+    if dataset_size == '300K':
+        nprobes = [1]
+
+    for nprobe in nprobes:
         start = time.time()
         D, I = lmi.search(queries, k, nprobe)
         searchtime = time.time() - start
