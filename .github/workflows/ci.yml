@@ -52,24 +52,26 @@ jobs:
         with:
           auto-update-conda: true
           python-version: ${{ matrix.python-version }}
-      - name: Install dependencies and benchmark LMI
+      - name: Install LMI dependencies
         shell: bash -el {0}
         run: |
-          # Install dependencies
           conda create -n lmi -y python=3.11
           conda activate lmi
           conda install -c pytorch -y faiss-cpu=1.8.0
           conda install h5py=3.11.0
           pip install --no-cache-dir numpy==1.26.4 tqdm==4.66.4 loguru==0.7.2 scikit-learn==1.5.1
           pip install --no-cache-dir torch==2.3.1 --index-url https://download.pytorch.org/whl/cpu
-          # Benchmark
+      - name: Benchmark LMI
+        shell: bash -el {0}
+        run: |
           pwd
           ls -l
           ls -l data2024
+          conda activate lmi
           # Parameters for 300K:
-          python3 task1.py --dataset-size ${DBSIZE} --sample-size 100000 --chunk-size 100000 &>task1.log
-          python3 task2.py --dataset-size ${DBSIZE} --sample-size 100000 --chunk-size 100000 &>task2.log
-          python3 task3.py --dataset-size ${DBSIZE} --sample-size 100000 --chunk-size 100000 &>task3.log
+          python3 task1.py --dataset-size 300K --sample-size 100000 --chunk-size 100000 &>task1.log
+          python3 task2.py --dataset-size 300K --sample-size 100000 --chunk-size 100000 &>task2.log
+          python3 task3.py --dataset-size 300K --sample-size 100000 --chunk-size 100000 &>task3.log
           # Parameters for 100M:
           # python3 task1.py &>task1.log
           # python3 task2.py &>task2.log
