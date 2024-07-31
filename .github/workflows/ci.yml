@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    # Sequence of patterns matched against refs/heads
+    branches:
+      # Push events on main branch
+      - paper-sisap24-indexing-challenge
+    # Sequence of patterns matched against refs/tags
+    tags: "*"
+
+jobs:
+  test:
+    name: ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - "1.10"
+        os:
+          - ubuntu-latest
+        arch:
+          - x64
+        exclude:
+          - os: macOS-latest
+            arch: x86
+        python-version: ["3.11"]
+    steps:
+      - uses: actions/checkout@v4.1.7
+        with:
+          submodules: "true"
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies for downloading the dataset
+        run: |
+          sudo apt-get install curl libcurl4-openssl-dev
+      - name: Download database and queries
+        if: steps.cache-data2024.outputs.cache-hit != 'true'
+        env:
+          DBSIZE: 300K
+        run: |
+          mkdir data2024
+          cd data2024
+          curl -O https://sisap-23-challenge.s3.amazonaws.com/SISAP23-Challenge/laion2B-en-clip768v2-n=$DBSIZE.h5
+          curl -O http://ingeotec.mx/~sadit/sisap2024-data/public-queries-2024-laion2B-en-clip768v2-n=10k.h5
+          curl -O http://ingeotec.mx/~sadit/sisap2024-data/gold-standard-dbsize=$DBSIZE--public-queries-2024-laion2B-en-clip768v2-n=10k.h5
+          cd ..
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          python-version: ${{ matrix.python-version }}
+      - name: Install LMI dependencies
+        shell: bash -el {0}
+        run: |
+          conda create -n lmi -y python=3.11
+          conda activate lmi
+          conda install -c pytorch -y faiss-cpu=1.8.0
+          conda install h5py=3.11.0
+          pip install --no-cache-dir numpy==1.26.4 tqdm==4.66.4 loguru==0.7.2 scikit-learn==1.5.1
+          pip install --no-cache-dir torch==2.3.1 --index-url https://download.pytorch.org/whl/cpu
+      - name: Benchmark LMI
+        shell: bash -el {0}
+        run: |
+          pwd
+          ls -l 
+          ls -l data2024
+          conda activate lmi
+          # Parameters for 300K:
+          python3 task1.py --dataset-size ${DBSIZE} --sample-size 100000 --chunk-size 100000 &>task1.log
+          python3 task2.py --dataset-size ${DBSIZE} --sample-size 100000 --chunk-size 100000 &>task2.log
+          python3 task3.py --dataset-size ${DBSIZE} --sample-size 100000 --chunk-size 100000 &>task3.log
+          # Parameters for 100M:
+          # python3 task1.py &>task1.log
+          # python3 task2.py &>task2.log
+          # python3 task3.py &>task3.log
+          python3 eval.py --results result res.csv
+      - uses: actions/upload-artifact@v4.3.4
+        with:
+          name: Results
+          path: |
+            res.csv
+            task1.log
+            task2.log
+            task3.log
