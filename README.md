@@ -13,7 +13,7 @@ docker build -t sisap24 -f Dockerfile .
 docker run -it --rm sisap24 bash
 ```
 
-## Using Conda
+### Using Conda
 
 ```shell
 conda create -n lmi -y python=3.11
