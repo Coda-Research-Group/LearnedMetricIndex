@@ -67,7 +67,6 @@ jobs:
           pwd
           ls -l 
           ls -l data2024
-          conda activate lmi
           # Parameters for 300K:
           python3 task1.py --dataset-size ${DBSIZE} --sample-size 100000 --chunk-size 100000 &>task1.log
           python3 task2.py --dataset-size ${DBSIZE} --sample-size 100000 --chunk-size 100000 &>task2.log
