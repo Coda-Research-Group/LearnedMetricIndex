@@ -27,6 +27,8 @@ pip install --no-cache-dir torch==2.3.1 --index-url https://download.pytorch.org
 
 ### 300K dataset
 
+Note that experiments with this dataset size will only visit a single bucket in each task. This is done to speed up the CI pipeline.
+
 ```shell
 DBSIZE=300K
 
