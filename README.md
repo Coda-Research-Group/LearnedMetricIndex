@@ -4,7 +4,7 @@ This branch contains the code for our submission to the SISAP 2024 Indexing Chal
 
 ## Setup
 
-See also `.github/workflows/ci.yml`. Note the different parameters for 300K and 100M datasets when running the experiments.
+See also `.github/workflows/ci.yml`. Note the different parameters for 300K and 100M datasets when running the experiments. We encourage Windows users to use Docker.
 
 ### Using Docker
 
