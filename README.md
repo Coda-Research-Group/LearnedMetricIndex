@@ -2,6 +2,15 @@
 
 This branch contains the code for our submission to the SISAP 2024 Indexing Challenge.
 
+**Members:**
+
+- [David Procházka](https://github.com/ProchazkaDavid), Masaryk University
+- [Terézia Slanináková](https://github.com/TerkaSlan), Masaryk University
+- Jozef Čerňanský, Masaryk University
+- [Jaroslav Oľha](https://github.com/JaroOlha), Masaryk University
+- Matej Antol, Masaryk University
+- [Vlastislav Dohnal](https://github.com/dohnal), Masaryk University
+
 ## Setup
 
 See also `.github/workflows/ci.yml`. Note the different parameters for 300K and 100M datasets when running the experiments. We encourage Windows users to use Docker.
