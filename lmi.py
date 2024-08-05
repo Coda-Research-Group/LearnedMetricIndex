@@ -4,7 +4,7 @@ from pathlib import Path
 
 import h5py
 import torch
-from faiss import Kmeans
+from faiss import METRIC_L2, Kmeans, knn
 from torch import Tensor
 from torch.nn import CrossEntropyLoss, Linear, ReLU, Sequential
 from torch.nn.functional import softmax
@@ -109,7 +109,7 @@ class LMI:
 
         # Compute the k nearest neighbors in a brute-force way
         # ! Beware: these are not global nearest neighbors IDs, but only the IDs of nearest neighbors within the bucket
-        nearest_neighbors = torch.cdist(query, bucket_data).topk(k, largest=False)[1][0]
+        nearest_neighbors = knn(query, bucket_data, k, metric=METRIC_L2)[1][0]
 
         # Convert the indices back to the global IDs
         return bucket_data_ids[nearest_neighbors]
