@@ -1,7 +1,7 @@
 FROM python:3.10-slim
 
 LABEL author="Terézia Slanináková"
-LABEL email="xslanin@mail.muni.cz"
+LABEL email="slaninakova@mail.muni.cz"
 LABEL website="https://disa.fi.muni.cz/complex-data-analysis/"
 
 # Set the version of the image to use, default: cpu
