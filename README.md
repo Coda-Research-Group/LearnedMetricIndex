@@ -2,40 +2,49 @@
 
 Learned Metric Index (LMI) is an index for approximate nearest neighbor search on complex data using machine learning and probability-based navigation. 
 
-
 # Getting started
 
 See examples of how to index and search in a dataset in: [01_Introduction.ipynb](01_Introduction.ipynb) notebook.
 
 ## Installation
 
-See also ``.github/workflows/ci.yml``
-
-### Using conda
+### Using virtualenv
 ```bash
-conda create -n env python=3.8
-conda activate env
-conda install matplotlib pandas scikit-learn jupyterlab
-pip install h5py flake8 setuptools tqdm faiss-cpu
-pip install torch --index-url https://download.pytorch.org/whl/cpu
+# 1) Clone the repo with submodules 
+git clone --recursive git@github.com:LearnedMetricIndex/LearnedMetricIndex.git
+# 2) Create and activate a new virtual environment
+python -m venv lmi-env
+source lmi-env/bin/activate
+# 3) Install the dependencies
+pip install -r requirements-cpu.txt # alternatively requirements-gpu.txt
 pip install --editable .
+```
+
+### Using docker
+
+Requirements:
+- [Docker](https://docs.docker.com/get-docker/)
+- At least 1.5 gb disk space for the CPU and up to 5.5 gb for the GPU version
+
+```bash
+# 1) Clone the repo with submodules 
+git clone --recursive git@github.com:LearnedMetricIndex/LearnedMetricIndex.git
+# 2) Build the docker image (CPU version)
+docker build -t lmi -f Dockerfile --build-arg version=cpu .
+# alternatively: docker build -t lmi -f Dockerfile --build-arg version=gpu .
+# 3) Run the docker image
+docker run -p 8888:8888 -it lmi bash
 ```
 
 ## Running
 
 ```bash
-jupyter-lab
-# and open 01_Introduction.ipynb
+# Run jupyterlab, copy the outputted url into the browser and open 01_Introduction.ipynb
+jupyter-lab --ip 0.0.0.0 --no-browser
 
-# or
-python3 search/search.py
-```
-
-## Evaluation
-
-```bash
-python3 eval/eval.py
-python3 eval/plot.py res.csv
+# Run the search on 100k data subset, evaluate the results and plot them.
+# Expected time to run = ~5-10 mins
+python3 search/search.py && python eval/eval.py && python eval/plot.py res.csv
 ```
 
 ## Performance
@@ -64,7 +73,8 @@ python3 eval/plot.py res.csv
 - ~6h of runtime (waries depending on the hardware)
 
 # LMI in action
-🌐 [**Similarity search in 214M protein structures (AlphaFold DB)**](https://alphafind.fi.muni.cz/search)
+
+- 🌐 [**Similarity search in 214M protein structures (AlphaFold DB)**](https://alphafind.fi.muni.cz/)
 
 # Publications
 
@@ -86,7 +96,7 @@ python3 eval/plot.py res.csv
 - [**Web**](https://alphafind.fi.muni.cz/search)
 - [**Repository**](https://github.com/Coda-Research-Group/AlphaFind)
 - [**Data**](https://data.narodni-repozitar.cz/general/datasets/d35zf-1ja47)
-> PROCHÁZKA, David, Terézia SLANINÁKOVÁ, Jaroslav OĽHA, Adrián ROŠINEC, Katarína GREŠOVÁ, Miriama JÁNOŠOVÁ, Jakub ČILLÍK, Jana PORUBSKÁ, Radka SVOBODOVÁ, Vlastislav DOHNAL a Matej ANTOL.: [AlphaFind: Discover structure similarity across the entire known proteome](https://www.biorxiv.org/content/10.1101/2024.02.15.580465v1). BioRxiv (pre-print version)
+> Procházka, D., Slanináková, T., Oľha, J., Rošinec, A., Grešová, K., Jánošová, M., Čillík, J., Porubská, J., Svobodová, R., Dohnal, V., & Antol, M. (2024). [AlphaFind: discover structure similarity across the proteome in AlphaFold DB](https://academic.oup.com/nar/article/52/W1/W182/7673488). Nucleic Acids Research.
 
 
 ## Team
