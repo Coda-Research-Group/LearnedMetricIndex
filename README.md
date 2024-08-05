@@ -2,7 +2,6 @@
 
 Learned Metric Index (LMI) is an index for approximate nearest neighbor search on complex data using machine learning and probability-based navigation. 
 
-
 # Getting started
 
 See examples of how to index and search in a dataset in: [01_Introduction.ipynb](01_Introduction.ipynb) notebook.
@@ -74,7 +73,8 @@ python3 search/search.py && python eval/eval.py && python eval/plot.py res.csv
 - ~6h of runtime (waries depending on the hardware)
 
 # LMI in action
-🌐 [**Similarity search in 214M protein structures (AlphaFold DB)**](https://alphafind.fi.muni.cz/search)
+
+- 🌐 [**Similarity search in 214M protein structures (AlphaFold DB)**](https://alphafind.fi.muni.cz/)
 
 # Publications
 
@@ -96,7 +96,7 @@ python3 search/search.py && python eval/eval.py && python eval/plot.py res.csv
 - [**Web**](https://alphafind.fi.muni.cz/search)
 - [**Repository**](https://github.com/Coda-Research-Group/AlphaFind)
 - [**Data**](https://data.narodni-repozitar.cz/general/datasets/d35zf-1ja47)
-> PROCHÁZKA, David, Terézia SLANINÁKOVÁ, Jaroslav OĽHA, Adrián ROŠINEC, Katarína GREŠOVÁ, Miriama JÁNOŠOVÁ, Jakub ČILLÍK, Jana PORUBSKÁ, Radka SVOBODOVÁ, Vlastislav DOHNAL a Matej ANTOL.: [AlphaFind: Discover structure similarity across the entire known proteome](https://www.biorxiv.org/content/10.1101/2024.02.15.580465v1). BioRxiv (pre-print version)
+> Procházka, D., Slanináková, T., Oľha, J., Rošinec, A., Grešová, K., Jánošová, M., Čillík, J., Porubská, J., Svobodová, R., Dohnal, V., & Antol, M. (2024). [AlphaFind: discover structure similarity across the proteome in AlphaFold DB](https://academic.oup.com/nar/article/52/W1/W182/7673488). Nucleic Acids Research.
 
 
 ## Team
