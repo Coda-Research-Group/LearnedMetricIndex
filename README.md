@@ -82,3 +82,7 @@ python3 eval.py --results result res.csv
 # Show the results
 cat res.csv
 ```
+
+## Results and Figures
+
+The results of our experiments on the 100M dataset are stored in [`figures/res.csv`](./figures/res.csv). The accompanying plots ([The impact of the number of visited buckets on average recall](figures/nprobe-recall.pdf) and [The impact of the number of visited buckets on the search time](figures/nprobe-querytime.pdf)) were generated using [`figures/plot.py`](./figures/plot.py). To reproduce the plots, install the `seaborn`, `pandas` and `matplotlib` libraries and run the file.
