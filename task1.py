@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import os
+os.environ['MKL_NUM_THREADS'] = '27'
+os.environ['OMP_NUM_THREADS'] = '27'
+os.environ['OMP_DYNAMIC'] = 'FALSE'
+os.environ['MKL_DYNAMIC'] = 'FALSE'
+
 import argparse
 import gc
 import time
@@ -20,6 +26,8 @@ from tqdm import tqdm
 
 import utils
 
+torch.set_num_threads(27)
+faiss.omp_set_num_threads(27)
 SEED = 42
 torch.manual_seed(SEED)
 
@@ -121,7 +129,10 @@ class LMI:
         D = np.empty((n_queries, k), dtype=np.float16)
         I = np.empty((n_queries, k), dtype=np.int32)
 
-        with ThreadPoolExecutor() as executor:
+        torch.set_num_threads(3)
+        faiss.omp_set_num_threads(3)
+
+        with ThreadPoolExecutor(max_workers=9) as executor: 
             results = executor.map(
                 lambda i: self._visit_buckets(k, predicted_bucket_ids[i], queries[i : i + 1], i, nprobe),
                 range(n_queries),
