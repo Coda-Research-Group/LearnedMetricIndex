@@ -6,7 +6,7 @@ This branch contains the code for our submission to the SISAP 2024 Indexing Chal
 
 - [David Procházka](https://github.com/ProchazkaDavid), Masaryk University
 - [Terézia Slanináková](https://github.com/TerkaSlan), Masaryk University
-- Jozef Čerňanský, Masaryk University
+- [Jozef Čerňanský](https://github.com/jozefCer), Masaryk University
 - [Jaroslav Oľha](https://github.com/JaroOlha), Masaryk University
 - Matej Antol, Masaryk University
 - [Vlastislav Dohnal](https://github.com/dohnal), Masaryk University
