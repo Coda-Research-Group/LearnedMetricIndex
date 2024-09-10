@@ -1,0 +1,20 @@
+[package]
+name = "toy"
+version = "0.1.0"
+edition = "2021"
+
+
+[dependencies]
+faiss = "0.12.1"
+hdf5 = "0.8.1"
+kmeans = "0.10.0"
+ndarray = "0.15.6"
+rand = { version = "0.8.5", features = [ "small_rng" ] }
+rayon = "1.10.0"
+# tch = "0.17.0"
+tch = { version = "0.17.0", features = ["download-libtorch"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+debug = 1
