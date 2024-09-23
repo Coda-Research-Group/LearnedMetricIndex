@@ -181,9 +181,43 @@ impl LMI {
     }
 
     /// Search in multiple buckets and find closest k neighbors out of ALL of them
-    fn search_multiple_buckets(&self, query: &Tensor, k: i64, num_buckets: i64) -> Tensor {
-        let bucket_ids = self.predict(query, num_buckets).1;
+    // fn search_multiple_buckets(&self, query: &Tensor, k: i64, num_buckets: i64) -> Tensor {
+    //     let bucket_ids = self.predict(query, num_buckets).1;
 
+    //     let mut all_dists = Vec::new();
+    //     let mut all_data_ids = Vec::new();
+
+    //     // Loop over each predicted bucket
+    //     for i in 0..num_buckets {
+    //         let bucket_id = bucket_ids.int64_value(&[i]);
+    //         if let Some(bucket_data) = self.bucket_data.get(&bucket_id) {
+    //             if let Some(bucket_data_ids) = self.bucket_data_ids.get(&bucket_id) {
+    //                 // Calculate distances from the query to the items in this bucket
+    //                 let dists = (bucket_data - query)
+    //                     .pow(&Tensor::from(2.0))
+    //                     .sum_dim_intlist(1, false, Kind::Float)
+    //                     .sqrt();
+
+    //                 // Collect distances and corresponding data IDs
+    //                 all_dists.push(dists);
+    //                 all_data_ids.push(bucket_data_ids);
+    //             }
+    //         }
+    //     }
+
+    //     // Concatenate distances and data IDs from all buckets
+    //     let all_dists = Tensor::cat(&all_dists, 0);
+    //     let all_data_ids = Tensor::cat(&all_data_ids, 0);
+
+    //     // Sort all distances and get the top k closest ones
+    //     let indices = all_dists.sort(0, false).1.i((..k,));
+
+    //     // Return the data IDs corresponding to the top k closest items
+    //     all_data_ids.index(&[Some(indices)])
+    // }
+
+    fn search_multiple_buckets(&self, query: &Tensor, bucket_ids: &Tensor, k: i64) -> Tensor {
+        let num_buckets = bucket_ids.size()[0];
         let mut all_dists = Vec::new();
         let mut all_data_ids = Vec::new();
 
@@ -222,6 +256,15 @@ impl LMI {
             logits.softmax(-1, Kind::Float).topk(top_k, -1, true, true)
         })
     }
+}
+
+fn to_raw_ptr<T>(x: &T) -> usize {
+    let x_ptr = x as *const T;
+    x_ptr as *const usize as usize
+}
+
+fn from_raw_ptr<'a, T>(raw_ptr: usize) -> &'a T {
+    unsafe { &*(raw_ptr as *const T) }
 }
 
 fn main() {
@@ -330,39 +373,70 @@ fn main() {
     //     recall_sum += intersection as f64 / k as f64;
     // }
 
-    let X_ptr = &X as *const Tensor;
-    let X_raw_ptr = X_ptr as *const usize as usize;
+    // let X_ptr = &X as *const Tensor;
+    // let X_raw_ptr = X_ptr as *const usize as usize;
 
-    let lmi_ptr = &lmi as *const LMI;
-    let lmi_raw_ptr = lmi_ptr as *const usize as usize;
+    // let lmi_ptr = &lmi as *const LMI;
+    // let lmi_raw_ptr = lmi_ptr as *const usize as usize;
 
-    let recall_sum: f64 = (0..n).into_par_iter().map(|i| {
-        let X = unsafe {&*(X_raw_ptr as *const Tensor)};
-        let lmi = unsafe {&*(lmi_raw_ptr as *const LMI)};
-        let query = X.i((i, ..)).squeeze();
-        let nearest_neighbors = lmi.search_multiple_buckets(&query, k, 10);
-    
-        let ground_truth = (X - query)
-            .pow(&Tensor::from(2.0))
-            .sum_dim_intlist(1, false, Kind::Float)
-            .sqrt();
-    
-        let (dists, indices) = ground_truth.sort(0, false);
-    
-        let topk = 10;
-        let ground_truth_indices = indices.i((..topk,));
-        let lmi_indices = nearest_neighbors.i((..topk,));
-    
-        let ground_truth_indices = Vec::<i64>::try_from(ground_truth_indices).unwrap();
-        let ground_truth_indices: HashSet<i64> = HashSet::from_iter(ground_truth_indices);
-    
-        let lmi_indices = Vec::<i64>::try_from(lmi_indices).unwrap();
-        let lmi_indices: HashSet<i64> = HashSet::from_iter(lmi_indices);
-    
-        let intersection = ground_truth_indices.intersection(&lmi_indices).count();
-    
-        intersection as f64 / k as f64
-    }).sum();
+    // let X = unsafe { &*(X_raw_ptr as *const Tensor) };
+    // let lmi = unsafe { &*(lmi_raw_ptr as *const LMI) };
+    // let queries = (0..n)
+    //     .map(|i| X.i((i, ..)).squeeze())
+    //     .collect::<Vec<Tensor>>();
+    // let ground_truths = (0..n)
+    //     .map(|i| {
+    //         (X - queries[i as usize])
+    //             .pow(&Tensor::from(2.0))
+    //             .sum_dim_intlist(1, false, Kind::Float)
+    //             .sqrt()
+    //     })
+    //     .collect::<Vec<Tensor>>();
+    // let query = X.i((i, ..)).squeeze();
+
+    let bucket_ids = lmi.predict(&X, 10).1;
+
+    let X_raw_ptr = to_raw_ptr(&X);
+    let lmi_raw_ptr = to_raw_ptr(&lmi);
+    let bucket_ids_raw_ptr = to_raw_ptr(&bucket_ids);
+    print!("Bucket IDs shape: {:?}", bucket_ids.size());
+
+    // let a = lmi.search_multiple_buckets(&X.i((0, ..)), &bucket_ids.i((0, ..)), k);
+    // println!("A: {:?}", a);
+
+    let recall_sum: f64 = (0..n)
+        .into_par_iter()
+        .map(|i| {
+            let X: &Tensor = from_raw_ptr(X_raw_ptr);
+            let lmi: &LMI = from_raw_ptr(lmi_raw_ptr);
+            let bucket_ids: &Tensor = from_raw_ptr(bucket_ids_raw_ptr);
+
+            let query = X.i((i, ..));
+
+            let nearest_neighbors = lmi.search_multiple_buckets(&query, &bucket_ids.i((i, ..)), k);
+
+            let ground_truth = (X - query)
+                .pow(&Tensor::from(2.0))
+                .sum_dim_intlist(1, false, Kind::Float)
+                .sqrt();
+
+            let (_, indices) = ground_truth.sort(0, false);
+
+            let topk = 10;
+            let ground_truth_indices = indices.i((..topk,));
+            let lmi_indices = nearest_neighbors.i((..topk,));
+
+            let ground_truth_indices = Vec::<i64>::try_from(ground_truth_indices).unwrap();
+            let ground_truth_indices: HashSet<i64> = HashSet::from_iter(ground_truth_indices);
+
+            let lmi_indices = Vec::<i64>::try_from(lmi_indices).unwrap();
+            let lmi_indices: HashSet<i64> = HashSet::from_iter(lmi_indices);
+
+            let intersection = ground_truth_indices.intersection(&lmi_indices).count();
+
+            intersection as f64 / k as f64
+        })
+        .sum();
 
     println!("Avg. Recall: {}", recall_sum / n as f64);
     println!("Recall evaluated in {:?}", now.elapsed());
