@@ -1,5 +1,7 @@
 # Introduction
 
+[![DOI](https://zenodo.org/badge/732580140.svg)](https://doi.org/10.5281/zenodo.13860051)
+
 Learned Metric Index (LMI) is an index for approximate nearest neighbor search on complex data using machine learning and probability-based navigation. 
 
 # Getting started
