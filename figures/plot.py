@@ -73,6 +73,8 @@ def plot_recall() -> None:
         plot = plot_curve(combined_df, 'nprobe', 'recall', 'task')
         plot.set(xlabel='Number of visited buckets', ylabel='Average recall')
         plot.get_legend().set_title('')
+        plot.axhline(0.4, color='black', linestyle=':')
+        plot.axhline(0.8, color='black', linestyle=':')
         plt.ylim([None, 1])
         plt.savefig('nprobe-recall.pdf')
         plt.show()
