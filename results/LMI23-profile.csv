@@ -1,0 +1,6 @@
+data,size,algo,buildtime,querytime,params,recall
+laion2B,10M,Learned-index,4135.907937288284,8390.281680822372,learned-index-laion2B-10M-ep=15-lr=0.00098-cat=3181-model=MLP-2024-buck=1,0.75554
+laion2B,10M,Learned-index,4135.907937288284,8787.048820257187,learned-index-laion2B-10M-ep=15-lr=0.00098-cat=3181-model=MLP-2024-buck=2,0.88113
+laion2B,10M,Learned-index,4135.907937288284,9012.56260228157,learned-index-laion2B-10M-ep=15-lr=0.00098-cat=3181-model=MLP-2024-buck=3,0.93111
+laion2B,10M,Learned-index,4135.907937288284,9297.303195238113,learned-index-laion2B-10M-ep=15-lr=0.00098-cat=3181-model=MLP-2024-buck=5,0.9672
+laion2B,10M,Learned-index,4135.907937288284,9120.618943691254,learned-index-laion2B-10M-ep=15-lr=0.00098-cat=3181-model=MLP-2024-buck=4,0.954
