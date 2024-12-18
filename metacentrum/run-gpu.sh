@@ -8,7 +8,7 @@ export OMP_NUM_THREADS=$PBS_NUM_PPN
 
 cd $SCRATCHDIR || exit 1
 module add mambaforge || exit 2
-cp /storage/brno12-cerit/home/cernansky-jozef/LearnedMetricIndex/task1-gpu.py gpu.py || exit 4
+cp /storage/brno12-cerit/home/cernansky-jozef/LearnedMetricIndex/experiments/task1-gpu.py gpu.py || exit 4
 cp /storage/brno12-cerit/home/cernansky-jozef/LearnedMetricIndex/task1.py base.py || exit 4
 cp /storage/brno12-cerit/home/cernansky-jozef/LearnedMetricIndex/utils.py utils.py || exit 5
 cp '/storage/brno2/home/cernansky-jozef/datasets/laion2B-en-clip768v2-n=100M.h5' './laion2B-en-clip768v2-n=100M.h5' || exit 6

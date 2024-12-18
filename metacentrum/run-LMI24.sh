@@ -8,7 +8,7 @@ export OMP_NUM_THREADS=$PBS_NUM_PPN
 
 cd $SCRATCHDIR || exit 1
 module add mambaforge || exit 2
-mamba activate /storage/brno12-cerit/home/cernansky-jozef/.conda/envs/learnedmetricindex-bp || exit 3
+mamba activate /storage/brno12-cerit/home/cernansky-jozef/.conda/envs/sisap23 || exit 3
 cp /storage/brno12-cerit/home/cernansky-jozef/LearnedMetricIndex/task1.py main.py || exit 4
 cp /storage/brno12-cerit/home/cernansky-jozef/LearnedMetricIndex/utils.py utils.py || exit 5
 cp /storage/brno12-cerit/home/cernansky-jozef/sisap23-laion-challenge-learned-index/search/search.py ./search.py || exit 6
@@ -16,6 +16,7 @@ cp -r /storage/brno12-cerit/home/cernansky-jozef/sisap23-laion-challenge-learned
 cp '/storage/brno2/home/cernansky-jozef/datasets/laion2B-en-clip768v2-n=10M.h5' './laion2B-en-clip768v2-n=10M.h5' || exit 8
 
 python3 main.py --dataset-size 10M &>/storage/brno12-cerit/home/cernansky-jozef/logs/LMI24-10M-profile.log
+mamba activate /storage/brno12-cerit/home/cernansky-jozef/.conda/envs/learnedmetricindex-bp || exit 3
 python3 search.py --size 10M &>/storage/brno12-cerit/home/cernansky-jozef/logs/LMI23-10M-profile.log
 CODE=$?
 

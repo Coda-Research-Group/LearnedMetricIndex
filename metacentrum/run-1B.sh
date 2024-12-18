@@ -9,7 +9,7 @@ export OMP_NUM_THREADS=$PBS_NUM_PPN
 cd $SCRATCHDIR || exit 1
 module add mambaforge || exit 2
 mamba activate /storage/brno12-cerit/home/cernansky-jozef/.conda/envs/learnedmetricindex-bp || exit 3
-cp /storage/brno12-cerit/home/cernansky-jozef/LearnedMetricIndex/task1-1B.py main.py || exit 4
+cp /storage/brno12-cerit/home/cernansky-jozef/LearnedMetricIndex/experiments/task1-1B.py main.py || exit 4
 cp /storage/brno12-cerit/home/cernansky-jozef/LearnedMetricIndex/utils.py utils.py || exit 5
 cp '/storage/brno12-cerit/home/cernansky-jozef/datasets/DEEP/base.1B.fbin' './base.1B.fbin' || exit 6
 
