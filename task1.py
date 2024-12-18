@@ -1,11 +1,5 @@
 from __future__ import annotations
 
-import os
-os.environ['MKL_NUM_THREADS'] = '27'
-os.environ['OMP_NUM_THREADS'] = '27'
-os.environ['OMP_DYNAMIC'] = 'FALSE'
-os.environ['MKL_DYNAMIC'] = 'FALSE'
-
 import argparse
 import gc
 import time
@@ -26,8 +20,8 @@ from tqdm import tqdm
 
 import utils
 
-torch.set_num_threads(27)
-faiss.omp_set_num_threads(27)
+torch.set_num_threads(28)
+faiss.omp_set_num_threads(28)
 SEED = 42
 torch.manual_seed(SEED)
 
@@ -129,10 +123,10 @@ class LMI:
         D = np.empty((n_queries, k), dtype=np.float16)
         I = np.empty((n_queries, k), dtype=np.int32)
 
-        torch.set_num_threads(3)
-        faiss.omp_set_num_threads(3)
+        torch.set_num_threads(4)
+        faiss.omp_set_num_threads(4)
 
-        with ThreadPoolExecutor(max_workers=9) as executor: 
+        with ThreadPoolExecutor(max_workers=8) as executor:
             results = executor.map(
                 lambda i: self._visit_buckets(k, predicted_bucket_ids[i], queries[i : i + 1], i, nprobe),
                 range(n_queries),
@@ -285,7 +279,7 @@ def task1(
     # nprobe: int,
     chunk_size: int,
 ) -> None:
-    dataset = Path(f'data2024/laion2B-en-clip768v2-n={dataset_size}.h5')
+    dataset = Path(f'./laion2B-en-clip768v2-n={dataset_size}.h5')
 
     n_buckets = int(alpha * sqrt(utils.get_dataset_size(dataset)))
 

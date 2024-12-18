@@ -2,29 +2,25 @@ from __future__ import annotations
 
 import argparse
 import gc
+import os
+import resource
 import time
 from concurrent.futures import ThreadPoolExecutor
 from math import ceil, sqrt
 from pathlib import Path
 
 import faiss
+import h5py
 import numpy as np
 import torch
 import torch.utils
-import h5py
 from loguru import logger
 from torch import Tensor
 from torch.nn import CrossEntropyLoss, Linear, ReLU, Sequential
 from torch.optim import Adam
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-import csv
 
-import resource
-import psutil
-
-from memory_profiler import profile
-import os
 import utils
 
 torch.set_num_threads(28)
@@ -132,7 +128,7 @@ class LMI:
         n_queries = queries.shape[0]
         D = np.empty((n_queries, k), dtype=np.float16)
         I = np.empty((n_queries, k), dtype=np.int32)
-        
+
         torch.set_num_threads(4)
         faiss.omp_set_num_threads(4)
 

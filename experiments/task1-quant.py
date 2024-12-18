@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import gc
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from math import ceil, sqrt
@@ -18,13 +19,7 @@ from torch.nn import CrossEntropyLoss, Linear, ReLU, Sequential
 from torch.optim import Adam
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-import csv
 
-import cProfile, pstats, io
-from pstats import SortKey
-import sys
-
-import os
 import utils
 
 torch.set_num_threads(28)
@@ -139,7 +134,7 @@ class LMI:
         n_queries = queries.shape[0]
         D = np.empty((n_queries, k), dtype=np.float16)
         I = np.empty((n_queries, k), dtype=np.int32)
-        
+
         #torch.set_num_threads(4)
         #faiss.omp_set_num_threads(4)
 
@@ -321,7 +316,7 @@ class LMI:
                 y[start:stop] = torch.from_numpy(kmeans.index.search(chunk.to(torch.float32), 1)[1].T[0])
 
             del chunk
-        
+
         acc_fp32 = torch.eq(y, y_fp32).sum().item() / n_data
         acc_ptdq = torch.eq(y, y_ptdq).sum().item() / n_data
 
@@ -366,7 +361,7 @@ def task1(
     identifier = f't1-{dataset_size}-epochs={epochs}-lr={lr}-sample={sample_size}-alpha={alpha}-chunk_size={chunk_size}-nprobe={nprobe}'
     modelingtime, encdatabasetime, encqueriestime = 0.0, 0.0, 0.0
 
-    
+
     utils.store_results(
         Path('/storage/brno12-cerit/home/cernansky-jozef/result/') / 'task1' / dataset_size / f'{identifier}.h5',
         'lmi',
@@ -380,7 +375,7 @@ def task1(
         identifier,
         dataset_size,
     )
-    '''
+    """
     nprobes = range(1, 30 + 1)
     if dataset_size == '300K':
         nprobes = [1]
@@ -406,7 +401,7 @@ def task1(
             identifier,
             dataset_size,
         )
-    '''
+    """
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

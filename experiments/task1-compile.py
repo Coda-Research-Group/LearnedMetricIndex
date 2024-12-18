@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import gc
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from math import ceil, sqrt
@@ -17,16 +18,11 @@ from torch.nn import CrossEntropyLoss, Linear, ReLU, Sequential
 from torch.optim import Adam
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-import csv
 
-import cProfile, pstats, io
-from pstats import SortKey
-
-import os
 import utils
 
-#torch.set_num_threads(28)
-#faiss.omp_set_num_threads(28)
+torch.set_num_threads(28)
+faiss.omp_set_num_threads(28)
 
 SEED = 42
 torch.manual_seed(SEED)
@@ -134,7 +130,7 @@ class LMI:
         n_queries = queries.shape[0]
         D = np.empty((n_queries, k), dtype=np.float16)
         I = np.empty((n_queries, k), dtype=np.int32)
-        
+
         torch.set_num_threads(4)
         faiss.omp_set_num_threads(4)
 
@@ -277,7 +273,7 @@ class LMI:
             ReLU(),
             Linear(512, n_buckets),
         )
-        
+
         s = time.time()
         nn_opt = torch.compile(nn, mode='max-autotune')
         logger.debug(f"Compile time: {time.time() - s}")
@@ -329,8 +325,8 @@ def task1(
     nprobe: int,
     chunk_size: int,
 ) -> None:
-    # dataset = Path(f'./laion2B-en-clip768v2-n={dataset_size}.h5')
-    dataset = Path(f'/storage/brno2/home/cernansky-jozef/datasets/laion2B-en-clip768v2-n={dataset_size}.h5')
+    dataset = Path(f'./laion2B-en-clip768v2-n={dataset_size}.h5')
+    # dataset = Path(f'/storage/brno2/home/cernansky-jozef/datasets/laion2B-en-clip768v2-n={dataset_size}.h5')
     # dataset = Path(f'data2024/laion2B-en-clip768v2-n={dataset_size}.h5')
 
 
@@ -354,7 +350,7 @@ def task1(
     identifier = f't1-compile-{dataset_size}-epochs={epochs}-lr={lr}-sample={sample_size}-alpha={alpha}-chunk_size={chunk_size}-nprobe={nprobe}'
     modelingtime, encdatabasetime, encqueriestime = 0.0, 0.0, 0.0
 
-    
+
     utils.store_results(
         Path('/storage/brno12-cerit/home/cernansky-jozef/result/') / 'task1' / dataset_size / f'{identifier}.h5',
         'lmi',
@@ -368,7 +364,7 @@ def task1(
         identifier,
         dataset_size,
     )
-    '''
+    """
     nprobes = range(1, 30 + 1)
     if dataset_size == '300K':
         nprobes = [1]
@@ -394,7 +390,7 @@ def task1(
             identifier,
             dataset_size,
         )
-    '''
+    """
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

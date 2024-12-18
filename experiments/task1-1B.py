@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import gc
+import os
+import resource
 import time
 from concurrent.futures import ThreadPoolExecutor
 from math import ceil, sqrt
@@ -17,13 +19,7 @@ from torch.nn import CrossEntropyLoss, Linear, ReLU, Sequential
 from torch.optim import Adam
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-import csv
 
-import resource
-import cProfile, pstats, io
-from pstats import SortKey
-
-import os
 import utils
 
 torch.set_num_threads(32)
@@ -59,7 +55,7 @@ class LMI:
         """Mapping from bucket ID to the data in the bucket."""
         self.bucket_data_ids: dict[int, Tensor] = {}
         """Mapping from bucket ID to the indices of the data in the bucket."""
-    
+
     @utils.measure_runtime
     @staticmethod
     def _train_model(
@@ -94,7 +90,7 @@ class LMI:
             return torch.full((k,), float('-inf'), dtype=torch.float32), torch.full((k,), -1)
 
         bucket_data = self.bucket_data[bucket].to(torch.float32)
-        D, I = faiss.knn(query, bucket_data, k, metric=faiss.METRIC_INNER_PRODUCT)
+        D, I = faiss.knn(query, bucket_data, k, metric=faiss.METRIC_L2)
         del bucket_data
 
         temp_dist = torch.from_numpy(D[0])
@@ -119,7 +115,7 @@ class LMI:
             start, stop = nth_bucket * k, (nth_bucket + 1) * k
             Ds[start:stop], Is[start:stop] = D, I
 
-        dists, indices_to_keep = torch.topk(Ds, k, largest=True)
+        dists, indices_to_keep = torch.topk(Ds, k, largest=False)
 
         return dists, Is[indices_to_keep], query_idx
 
@@ -129,7 +125,7 @@ class LMI:
         n_queries = queries.shape[0]
         D = np.empty((n_queries, k), dtype=np.float16)
         I = np.empty((n_queries, k), dtype=np.int32)
-        
+
         torch.set_num_threads(4)
         faiss.omp_set_num_threads(4)
 
@@ -317,7 +313,7 @@ def task1(
         D, I = lmi.search(queries, k, nprobe)
         searchtime = time.time() - start
 
-        identifier = f't1-innerproduct-epochs={epochs}-lr={lr}-sample={sample_size}-alpha={alpha}-chunk_size={chunk_size}-nprobe={nprobe}'
+        identifier = f't1-epochs={epochs}-lr={lr}-sample={sample_size}-alpha={alpha}-chunk_size={chunk_size}-nprobe={nprobe}'
         modelingtime, encdatabasetime, encqueriestime = 0.0, 0.0, 0.0
 
         utils.store_results(

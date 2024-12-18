@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import gc
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from math import ceil, sqrt
@@ -17,12 +18,7 @@ from torch.nn import CrossEntropyLoss, Linear, ReLU, Sequential
 from torch.optim import Adam
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-import csv
 
-import cProfile, pstats, io
-from pstats import SortKey
-
-import os
 import utils
 
 torch.set_num_threads(28)
@@ -135,7 +131,7 @@ class LMI:
         n_queries = queries.shape[0]
         D = np.empty((n_queries, k), dtype=np.float16)
         I = np.empty((n_queries, k), dtype=np.int32)
-        
+
         torch.set_num_threads(4)
         faiss.omp_set_num_threads(4)
 
@@ -254,7 +250,7 @@ class LMI:
                 verbose=False,
             seed=SEED,
             spherical=True,
-            gpu=True
+            gpu=True,
         )
 
         kmeans.train(X_train)

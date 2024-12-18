@@ -4,10 +4,12 @@ import argparse
 import csv
 import glob
 import os
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator
 
 import numpy as np
+
+import utils
 
 os.environ['HDF5_USE_FILE_LOCKING'] = 'FALSE'  # Solves: Errno 121
 
@@ -15,7 +17,10 @@ import h5py
 
 
 def get_groundtruth(size: str = '300K'):
-    out_fn = Path(f'data2024/gold-standard-dbsize={size}--public-queries-2024-laion2B-en-clip768v2-n=10k.h5')
+    if size == "1B":
+        ground_truth_path = Path('/storage/brno12-cerit/home/cernansky-jozef/datasets/DEEP/groundtruth.public.10K.ibin')
+        return utils.read_ibin(ground_truth_path) + 1
+    out_fn = Path(f'/storage/brno12-cerit/home/prochazka/datasets/sisap24/gold-standard-dbsize={size}--public-queries-2024-laion2B-en-clip768v2-n=10k.h5')
     gt_f = h5py.File(out_fn, 'r')
     true_I = np.array(gt_f['knns'])
     gt_f.close()
@@ -64,7 +69,7 @@ if __name__ == '__main__':
     parser.add_argument('csvfile')
     args = parser.parse_args()
     true_I_cache = {}  # noqa: N816
-    test_sizes = ['300K', '10M', '100M']
+    test_sizes = ['300K', '10M', '100M', '1B']
 
     columns = [
         'size',

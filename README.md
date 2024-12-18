@@ -1,58 +1,23 @@
-# SISAP 2024 Indexing Challenge
+# Enhancing Performance of Learned Metric Index for Indexing Large Datasets
 
-This branch contains the code for our submission to the SISAP 2024 Indexing Challenge.
-
-**Members:**
-
-- [David Procházka](https://github.com/ProchazkaDavid), Masaryk University
-- [Terézia Slanináková](https://github.com/TerkaSlan), Masaryk University
-- [Jozef Čerňanský](https://github.com/jozefCer), Masaryk University
-- [Jaroslav Oľha](https://github.com/JaroOlha), Masaryk University
-- Matej Antol, Masaryk University
-- [Vlastislav Dohnal](https://github.com/dohnal), Masaryk University
-
-## Setup
-
-See also `.github/workflows/ci.yml`. Note the different parameters for 300K and 100M datasets when running the experiments. We encourage Windows users to use Docker.
-
-### Using Docker
+### Preparing enviroment
 
 ```shell
-docker build -t sisap24 -f Dockerfile .
-docker run -it --rm sisap24 bash
-```
-
-### Using Conda
-
-```shell
-conda create -n lmi -y python=3.11
-conda activate lmi
+conda create -n learnedmetric-bp -y python=3.11
+conda activate learnedmetric-bp
 conda install -c pytorch -y faiss-cpu=1.8.0
 conda install -y h5py=3.11.0
 pip install --no-cache-dir numpy==1.26.4 tqdm==4.66.4 loguru==0.7.2 scikit-learn==1.5.1
 pip install --no-cache-dir torch==2.3.1 --index-url https://download.pytorch.org/whl/cpu
 ```
-
-## Running Experiments
-
-### 300K dataset
-
-Note that experiments with this dataset size will only visit a single bucket in each task. This is done to speed up the CI pipeline.
+### Enviroment for GPU
 
 ```shell
-DBSIZE=300K
-
-# Download data
-mkdir data2024 && cd data2024
-wget https://sisap-23-challenge.s3.amazonaws.com/SISAP23-Challenge/laion2B-en-clip768v2-n=${DBSIZE}.h5
-wget http://ingeotec.mx/~sadit/sisap2024-data/public-queries-2024-laion2B-en-clip768v2-n=10k.h5
-wget http://ingeotec.mx/~sadit/sisap2024-data/gold-standard-dbsize=${DBSIZE}--public-queries-2024-laion2B-en-clip768v2-n=10k.h5
-cd ..
-
-# Run experiments on 300K dataset
-python3 task1.py --dataset-size ${DBSIZE} --sample-size 100000 --chunk-size 100000 &>task1.log
-python3 task2.py --dataset-size ${DBSIZE} --sample-size 100000 --chunk-size 100000 &>task2.log
-python3 task3.py --dataset-size ${DBSIZE} --sample-size 100000 --chunk-size 100000 &>task3.log
+conda create -n lmi-gpu -y python=3.11
+conda activate lmi-gpu
+conda install faiss-gpu=1.8.0 pytorch==2.3.1 torchvision==0.18.1 torchaudio==2.3.1 pytorch-cuda=12.1 -c pytorch -c nvidia
+conda install -y h5py=3.11.0
+pip install --no-cache-dir numpy==1.26.4 tqdm==4.66.4 loguru==0.7.2 scikit-learn==1.5.1
 ```
 
 ### 100M dataset
@@ -61,17 +26,21 @@ python3 task3.py --dataset-size ${DBSIZE} --sample-size 100000 --chunk-size 1000
 DBSIZE=100M
 
 # Download data
-mkdir data2024 && cd data2024
 wget https://sisap-23-challenge.s3.amazonaws.com/SISAP23-Challenge/laion2B-en-clip768v2-n=${DBSIZE}.h5
 wget http://ingeotec.mx/~sadit/sisap2024-data/public-queries-2024-laion2B-en-clip768v2-n=10k.h5
 wget http://ingeotec.mx/~sadit/sisap2024-data/gold-standard-dbsize=${DBSIZE}--public-queries-2024-laion2B-en-clip768v2-n=10k.h5
-cd ..
-
-# Run experiments on 100M dataset
-python3 task1.py &>task1.log
-python3 task2.py &>task2.log
-python3 task3.py &>task3.log
 ```
+
+### 1B dataset
+
+```shell
+
+# Download data
+wget https://storage.yandexcloud.net/yandex-research/ann-datasets/DEEP/base.1B.fbin
+wget https://storage.yandexcloud.net/yandex-research/ann-datasets/DEEP/query.public.10K.fbin
+wget https://storage.yandexcloud.net/yandex-research/ann-datasets/DEEP/groundtruth.public.10K.ibin
+```
+
 
 ### Evaluating Results
 
@@ -85,4 +54,5 @@ cat res.csv
 
 ## Results and Figures
 
-The results of our experiments on the 100M dataset are stored in [`figures/res.csv`](./figures/res.csv). The accompanying plots ([The impact of the number of visited buckets on average recall](figures/nprobe-recall.pdf) and [The impact of the number of visited buckets on the search time](figures/nprobe-querytime.pdf)) were generated using [`figures/plot.py`](./figures/plot.py). To reproduce the plots, install the `seaborn`, `pandas` and `matplotlib` libraries and run the file.
+The results of experiments are stored in 'data' directory. All of the experiments were conducted on Metacentrum, launched with the scripts in 'metacentrum'. In 'experiments' is the Python source code used in the experiments. LMI 2023 implementation was adopted and modified from  
+https://github.com/TerkaSlan/sisap23-laion-challenge-learned-index

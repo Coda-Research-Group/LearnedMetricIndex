@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import gc
+import os
+import resource
 import time
 from concurrent.futures import ThreadPoolExecutor
 from math import ceil, sqrt
@@ -17,14 +20,7 @@ from torch.nn import CrossEntropyLoss, Linear, ReLU, Sequential
 from torch.optim import Adam
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-import csv
 
-import cProfile, pstats, io
-from pstats import SortKey
-
-import resource
-import tracemalloc
-import os
 import utils
 
 torch.set_num_threads(28)
@@ -71,7 +67,7 @@ class LMI:
         self.bucket_data_ids: dict[int, Tensor] = {}
         """Mapping from bucket ID to the indices of the data in the bucket."""
 
-    
+
     @staticmethod
     def _train_model(
         model: Sequential,
@@ -100,7 +96,7 @@ class LMI:
 
         logger.debug('Finished training')
 
-    
+
     def _visit_bucket(self, bucket: int, query: Tensor, k: int) -> tuple[Tensor, Tensor]:
         if len(self.bucket_data[bucket]) == 0:
             return torch.full((k,), float('-inf'), dtype=torch.float32), torch.full((k,), -1)
@@ -114,7 +110,7 @@ class LMI:
 
         return temp_dist, temp_answer
 
-    
+
     def _visit_buckets(
         self,
         k: int,
@@ -136,7 +132,7 @@ class LMI:
 
         return dists, Is[indices_to_keep], query_idx
 
-    
+
     def search(self, queries: Tensor, k: int, nprobe: int = 100) -> tuple[np.ndarray, np.ndarray]:
         start = time.time()
         predicted_bucket_ids = self._predict(queries, nprobe)
@@ -144,7 +140,7 @@ class LMI:
         n_queries = queries.shape[0]
         D = np.empty((n_queries, k), dtype=np.float16)
         I = np.empty((n_queries, k), dtype=np.int32)
-        
+
         torch.set_num_threads(4)
         faiss.omp_set_num_threads(4)
 
@@ -179,7 +175,7 @@ class LMI:
     def _sort_data(self, data: Tensor, classes: Tensor, bucket: int, start: int, stop: int) -> None:
         self.bucket_data[bucket][start:stop] = data[classes == bucket]
 
-    
+
     def _label_data(self, dataset: Path, chunk_i: int, chunk_size: int) -> tuple[Tensor, int, int]:
         start, stop = chunk_i * chunk_size, (chunk_i + 1) * chunk_size
         chunk = utils.load_chunk(dataset, start, stop)
@@ -221,7 +217,7 @@ class LMI:
 
         return offsets
 
-    
+
     def _create_buckets(self, dataset: Path, n_data: int, chunk_size: int) -> None:
         logger.debug('Started bucket creation')
 
@@ -251,7 +247,7 @@ class LMI:
         gc.collect()
         logger.debug("fill_t,{}", time.time() - start)
 
-    
+
     @staticmethod
     def _run_kmeans(n_buckets: int, data_dim: int, X_train: Tensor) -> Tensor:
         kmeans = faiss.Kmeans(
@@ -264,7 +260,7 @@ class LMI:
         kmeans.train(X_train)
         return torch.from_numpy(kmeans.index.search(X_train, 1)[1].T[0])  # type: ignore
 
-    
+
     @staticmethod
     def create(
         dataset: Path,
@@ -347,12 +343,12 @@ def task1(
 
     identifier = f't1-alpha-80-{dataset_size}-epochs={epochs}-lr={lr}-sample={sample_size}-alpha={alpha}-chunk_size={chunk_size}-nprobe={nprobe}'
     modelingtime, encdatabasetime, encqueriestime = 0.0, 0.0, 0.0
-    
+
 
     with Path.open('/storage/brno12-cerit/home/cernansky-jozef/csv/aplha-80.csv', 'a') as file:
         writer = csv.writer(file)
         writer.writerow([alpha, buildtime, searchtime, nprobe, recall])
-    
+
     utils.store_results(
             Path('/storage/brno12-cerit/home/cernansky-jozef/result/') / 'task1-alpha' / dataset_size / f'{identifier}.h5',
             'lmi',
@@ -367,7 +363,7 @@ def task1(
             dataset_size,
         )
 
-    '''
+    """
     nprobes = range(1, 30 + 1)
     if dataset_size == '300K':
         nprobes = [1]
@@ -393,7 +389,7 @@ def task1(
             identifier,
             dataset_size,
         )
-    '''
+    """
 
 if __name__ == '__main__':
     for i in range(1, 20 + 1):
