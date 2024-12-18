@@ -2,7 +2,7 @@
 #PBS -q large_mem@pbs-m1.metacentrum.cz
 #PBS -l walltime=48:0:0
 #PBS -l select=1:ncpus=32:mem=1000gb:scratch_local=20gb:cluster=eltu
-#PBS -N LMI23-LMI24
+#PBS -N LMI23vsLMI24
 
 export OMP_NUM_THREADS=$PBS_NUM_PPN
 

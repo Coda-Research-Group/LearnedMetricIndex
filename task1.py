@@ -20,8 +20,10 @@ from tqdm import tqdm
 
 import utils
 
-torch.set_num_threads(28)
-faiss.omp_set_num_threads(28)
+NUM_THREADS = 28
+# NUM_THREADS = 32
+torch.set_num_threads(NUM_THREADS)
+faiss.omp_set_num_threads(NUM_THREADS)
 SEED = 42
 torch.manual_seed(SEED)
 
@@ -122,11 +124,13 @@ class LMI:
         n_queries = queries.shape[0]
         D = np.empty((n_queries, k), dtype=np.float16)
         I = np.empty((n_queries, k), dtype=np.int32)
-
+        
+        max_workers = 7
+        # max_workers = 8
         torch.set_num_threads(4)
         faiss.omp_set_num_threads(4)
 
-        with ThreadPoolExecutor(max_workers=8) as executor:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
             results = executor.map(
                 lambda i: self._visit_buckets(k, predicted_bucket_ids[i], queries[i : i + 1], i, nprobe),
                 range(n_queries),
