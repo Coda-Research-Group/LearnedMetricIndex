@@ -54,4 +54,4 @@ cat res.csv
 
 ## Results and Figures
 
-The results of experiments are stored in 'data' directory. All of the experiments were conducted on Metacentrum, launched with the scripts in 'metacentrum'. In 'experiments' is the Python source code used in the experiments. LMI 2023 implementation was adopted and modified from https://github.com/TerkaSlan/sisap23-laion-challenge-learned-index. 
+The results of experiments are stored in 'data' directory. All of the experiments were conducted on Metacentrum, launched with the scripts in 'metacentrum'. In 'experiments' is the Python source code used in the experiments. LMI 2023 implementation, which was used to compare with the new implementation, was adopted and modified from https://github.com/TerkaSlan/sisap23-laion-challenge-learned-index. 
