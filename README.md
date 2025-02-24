@@ -94,6 +94,9 @@ python3 search/search.py && python eval/eval.py && python eval/plot.py res.csv
 - [**Mendeley data**](https://data.mendeley.com/datasets/8wp73zxr47/12)
 > T. Slanináková, M. Antol, J. Ol'ha, V. Kaňa, V. Dohnal, S. Ladra, M. A. Martinez-Prieto: [Reproducible experiments with Learned Metric Index Framework](https://www.sciencedirect.com/science/article/pii/S0306437923000911). Information Systems, Volume 118, September 2023, 102255 (2023)
 
+**"Scaling LMI to 100M datasets" (2024):**
+> Procházka, D., Slanináková, T., Čerňanský, J., Olha, J., Antol, M., Dohnal, V. (2025). [Scaling Learned Metric Index to 100M Datasets](https://link.springer.com/chapter/10.1007/978-3-031-75823-2_22). SISAP 2024 - Similarity Search and Applications pp 266–273 (2024)
+
 **"LMI in a large (214M) protein database" (2024):**
 - [**Web**](https://alphafind.fi.muni.cz/search)
 - [**Repository**](https://github.com/Coda-Research-Group/AlphaFind)
