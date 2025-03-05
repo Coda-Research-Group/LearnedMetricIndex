@@ -20,18 +20,17 @@ use rayon::prelude::*;
 
 const SEED: i64 = 42;
 
-struct LMI {
+struct Lmi {
     n_buckets: i64,
     dimensionality: i64,
     bucket_data: HashMap<i64, Tensor>,
     bucket_data_ids: HashMap<i64, Tensor>,
     model: Sequential,
     epochs: i64,
-    lr: f64,
     optimizer: nn::Optimizer,
 }
 
-impl LMI {
+impl Lmi {
     fn new(n_buckets: i64, data_dimensionality: i64, vs: &nn::VarStore) -> Self {
         let path = &vs.root();
 
@@ -50,14 +49,13 @@ impl LMI {
         let lr = 0.001;
         let optimizer = nn::Adam::default().build(vs, lr).unwrap();
 
-        LMI {
+        Lmi {
             n_buckets,
             dimensionality: data_dimensionality,
             bucket_data: HashMap::new(),
             bucket_data_ids: HashMap::new(),
             model,
             epochs: 10,
-            lr,
             optimizer,
         }
     }
@@ -121,7 +119,7 @@ impl LMI {
         let train_loader = Iter2::new(X, &y, 256).collect::<Vec<_>>();
 
         // Train the model
-        for epoch in 1..=self.epochs {
+        for epoch in 1..self.epochs {
             for (X_batch, y_batch) in &train_loader {
                 let loss = self
                     .model
@@ -165,6 +163,7 @@ impl LMI {
         println!("Training completed in {:?}", now.elapsed());
     }
 
+    #[allow(unused)]
     fn search(&self, query: &Tensor, k: i64) -> Tensor {
         let bucket_id = self.predict(query, 1).1.int64_value(&[]);
         let bucket_data = self.bucket_data.get(&bucket_id).unwrap();
@@ -290,12 +289,12 @@ fn main() {
     // let X = X.i((..1000, ..)); // ! LIMIT FOR TESTING
     // println!("{:?}", X.size());
 
-    let (n, d) = X.size2().unwrap();
+    let (_, d) = X.size2().unwrap();
 
     // Create an instance of the LMI
     println!("Creating LMI...");
     let vs = nn::VarStore::new(Device::cuda_if_available());
-    let mut lmi = LMI::new(320, d, &vs);
+    let mut lmi = Lmi::new(320, d, &vs);
 
     lmi.train(&X);
 
@@ -335,11 +334,11 @@ fn main() {
     // Do the same thing as above, but with 100 queries (first 100 vectors in the dataset)
     let n = 200;
     let k: i64 = 10;
-    let mut recall_sum = 0.;
 
     println!("Evaluating recall for first 200 queries...");
     let now = Instant::now();
 
+    // let mut recall_sum = 0.;
     // for i in 0..n {
     //     let query = X.i((i, ..)).squeeze();
     //     // let nearest_neighbors = lmi.search(&query, k);
@@ -408,7 +407,7 @@ fn main() {
         .into_par_iter()
         .map(|i| {
             let X: &Tensor = from_raw_ptr(X_raw_ptr);
-            let lmi: &LMI = from_raw_ptr(lmi_raw_ptr);
+            let lmi: &Lmi = from_raw_ptr(lmi_raw_ptr);
             let bucket_ids: &Tensor = from_raw_ptr(bucket_ids_raw_ptr);
 
             let query = X.i((i, ..));
