@@ -179,7 +179,7 @@ impl Lmi {
         bucket_data_ids.index(&[Some(indices)])
     }
 
-    /// Search in multiple buckets and find closest k neighbors out of ALL of them
+    // Search in multiple buckets and find closest k neighbors out of ALL of them
     // fn search_multiple_buckets(&self, query: &Tensor, k: i64, num_buckets: i64) -> Tensor {
     //     let bucket_ids = self.predict(query, num_buckets).1;
 
