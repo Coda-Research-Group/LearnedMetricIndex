@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use half::f16;
 
 use tch::data::Iter2;
 use tch::kind::Kind;
@@ -266,24 +266,21 @@ fn from_raw_ptr<'a, T>(raw_ptr: usize) -> &'a T {
     unsafe { &*(raw_ptr as *const T) }
 }
 
+fn load_dataset(path: &str) -> Tensor {
+    let file = hdf5::File::open(path).unwrap();
+    let emb = file.dataset("emb").unwrap();
+    let data: Array2<f16> = emb.read_2d().unwrap();
+    Tensor::from_slice(data.as_slice().unwrap())
+        .to_kind(Kind::Float)
+        .reshape([emb.shape()[0] as i64, emb.shape()[1] as i64])
+}
+
 fn main() {
     println!("Starting...");
     tch::manual_seed(SEED);
 
     let now = Instant::now();
-    // Load the dataset
-    let dataset_path = Path::new("laion2B-en-clip768v2-n=100K.h5");
-    let file = hdf5::File::open(dataset_path).unwrap();
-    println!("Getting emb...");
-    let emb = file.dataset("emb").unwrap();
-
-    println!("Reading data...");
-    let data: Array2<f32> = emb.read_2d().unwrap();
-    println!("Slicing data...");
-    let X = Tensor::from_slice(data.as_slice().unwrap()).to_kind(Kind::Float);
-    println!("Reshaping data...");
-    let X = X.reshape([emb.shape()[0] as i64, emb.shape()[1] as i64]);
-
+    let X = load_dataset("laion2B-en-clip768v2-n=100K.h5");
     println!("Dataset loaded in {:?}", now.elapsed());
 
     // let X = X.i((..1000, ..)); // ! LIMIT FOR TESTING
