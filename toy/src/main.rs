@@ -89,7 +89,7 @@ impl Lmi {
             .build();
 
         let kmeans = kmeans.kmeans_minibatch(
-            4096,
+            2048,
             self.n_buckets as usize,
             99999,
             KMeans::init_random_sample,
