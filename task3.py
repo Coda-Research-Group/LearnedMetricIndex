@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+
 os.environ['MKL_NUM_THREADS'] = '27'
 os.environ['OMP_NUM_THREADS'] = '27'
 os.environ['OMP_DYNAMIC'] = 'FALSE'
@@ -135,13 +136,13 @@ class LMI:
     ) -> tuple[np.ndarray, np.ndarray]:
         predicted_bucket_ids = self._predict(queries, nprobe)
         n_queries = queries.shape[0]
-        D = np.empty((n_queries, k), dtype=np.float16)
+        D = np.empty((n_queries, k), dtype=np.float32)
         I = np.empty((n_queries, k), dtype=np.int32)
 
         torch.set_num_threads(3)
         faiss.omp_set_num_threads(3)
 
-        with ThreadPoolExecutor(max_workers=9) as executor: # max_workers=9
+        with ThreadPoolExecutor(max_workers=9) as executor:  # max_workers=9
             results = executor.map(
                 lambda i: self._visit_buckets(k, predicted_bucket_ids[i], decomposed_queries[i : i + 1], i, nprobe),
                 range(n_queries),

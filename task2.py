@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+
 os.environ['MKL_NUM_THREADS'] = '4'
 os.environ['OMP_NUM_THREADS'] = '4'
 os.environ['OMP_DYNAMIC'] = 'FALSE'
@@ -148,7 +149,7 @@ class LMI:
     ) -> tuple[np.ndarray, np.ndarray]:
         predicted_bucket_ids = self._predict(queries, nprobe)
         n_queries = queries.shape[0]
-        D = np.empty((n_queries, k), dtype=np.float16)
+        D = np.empty((n_queries, k), dtype=np.float32)
         I = np.empty((n_queries, k), dtype=np.int32)
 
         torch.set_num_threads(2)
