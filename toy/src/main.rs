@@ -10,7 +10,7 @@ use tch::{no_grad, Device, IndexOp, Tensor};
 
 use ndarray::Array2;
 
-use kmeans::{KMeans, KMeansConfig};
+use kmeans::{EuclideanDistance, KMeans, KMeansConfig};
 
 use rand::SeedableRng;
 
@@ -55,7 +55,7 @@ impl Lmi {
             bucket_data: HashMap::new(),
             bucket_data_ids: HashMap::new(),
             model,
-            epochs: 10,
+            epochs: 1,
             optimizer,
         }
     }
@@ -67,8 +67,8 @@ impl Lmi {
         println!("Running k-means...");
         let now = Instant::now();
         let v = Vec::<f32>::try_from(X.reshape([X.numel() as i64])).unwrap();
-        let kmeans: KMeans<_, 8> =
-            KMeans::new(v, X.size()[0] as usize, self.dimensionality as usize);
+        let kmeans: KMeans<_, 8, _> =
+            KMeans::new(v, X.size()[0] as usize, self.dimensionality as usize, EuclideanDistance);
         // Create seeded rng for reproducibility
         let rnd = rand::rngs::SmallRng::seed_from_u64(SEED as u64);
 
@@ -89,9 +89,9 @@ impl Lmi {
             .build();
 
         let kmeans = kmeans.kmeans_minibatch(
-            2048,
+            4096,
             self.n_buckets as usize,
-            99999,
+            200,
             KMeans::init_random_sample,
             &conf,
         );
@@ -280,7 +280,8 @@ fn main() {
     tch::manual_seed(SEED);
 
     let now = Instant::now();
-    let X = load_dataset("laion2B-en-clip768v2-n=100K.h5");
+    // let X = load_dataset("   2B-en-clip768v2-n=100K.h5");
+    let X = load_dataset("laion300k.h5");
     println!("Dataset loaded in {:?}", now.elapsed());
 
     // let X = X.i((..1000, ..)); // ! LIMIT FOR TESTING
@@ -329,7 +330,7 @@ fn main() {
     // println!("Recall: {}", intersection as f64 / k as f64);
 
     // Do the same thing as above, but with 100 queries (first 100 vectors in the dataset)
-    let n = 200;
+    let n = 10;
     let k: i64 = 10;
 
     println!("Evaluating recall for first 200 queries...");
@@ -390,15 +391,64 @@ fn main() {
     //     .collect::<Vec<Tensor>>();
     // let query = X.i((i, ..)).squeeze();
 
-    let bucket_ids = lmi.predict(&X, 10).1;
+    // let bucket_ids = lmi.predict(&X, 10).1;
+
+    // let X_raw_ptr = to_raw_ptr(&X);
+    // let lmi_raw_ptr = to_raw_ptr(&lmi);
+    // let bucket_ids_raw_ptr = to_raw_ptr(&bucket_ids);
+    // print!("Bucket IDs shape: {:?}", bucket_ids.size());
+
+    // // let a = lmi.search_multiple_buckets(&X.i((0, ..)), &bucket_ids.i((0, ..)), k);
+    // // println!("A: {:?}", a);
+
+    // let recall_sum: f64 = (0..n)
+    //     .into_par_iter()
+    //     .map(|i| {
+    //         let X: &Tensor = from_raw_ptr(X_raw_ptr);
+    //         let lmi: &Lmi = from_raw_ptr(lmi_raw_ptr);
+    //         let bucket_ids: &Tensor = from_raw_ptr(bucket_ids_raw_ptr);
+
+    //         let query = X.i((i, ..));
+
+    //         // let nearest_neighbors = lmi.search_multiple_buckets(&query, &bucket_ids.i((i, ..)), k);
+    //         let nearest_neighbors = lmi.search(&query, k);
+
+    //         let ground_truth = (X - query)
+    //             .pow(&Tensor::from(2.0))
+    //             .sum_dim_intlist(1, false, Kind::Float)
+    //             .sqrt();
+
+    //         let (_, indices) = ground_truth.sort(0, false);
+
+    //         let topk = 10;
+    //         let ground_truth_indices = indices.i((..topk,));
+    //         let lmi_indices = nearest_neighbors.i((..topk,));
+
+    //         let ground_truth_indices = Vec::<i64>::try_from(ground_truth_indices).unwrap();
+    //         let ground_truth_indices: HashSet<i64> = HashSet::from_iter(ground_truth_indices);
+
+    //         let lmi_indices = Vec::<i64>::try_from(lmi_indices).unwrap();
+    //         let lmi_indices: HashSet<i64> = HashSet::from_iter(lmi_indices);
+
+    //         let intersection = ground_truth_indices.intersection(&lmi_indices).count();
+
+    //         intersection as f64 / k as f64
+    //     })
+    //     .sum();
+
+    // println!("Avg. Recall: {}", recall_sum / n as f64);
+    // println!("Recall evaluated in {:?}", now.elapsed());
+
+    let queries = load_dataset("public-queries-2024-laion2B-en-clip768v2-n=10k.h5");
+    let queries_raw_ptr = to_raw_ptr(&queries);
+    let queries: &Tensor = from_raw_ptr(queries_raw_ptr);
+
+    let bucket_ids = lmi.predict(queries, 10).1;
 
     let X_raw_ptr = to_raw_ptr(&X);
     let lmi_raw_ptr = to_raw_ptr(&lmi);
     let bucket_ids_raw_ptr = to_raw_ptr(&bucket_ids);
     print!("Bucket IDs shape: {:?}", bucket_ids.size());
-
-    // let a = lmi.search_multiple_buckets(&X.i((0, ..)), &bucket_ids.i((0, ..)), k);
-    // println!("A: {:?}", a);
 
     let recall_sum: f64 = (0..n)
         .into_par_iter()
@@ -410,6 +460,7 @@ fn main() {
             let query = X.i((i, ..));
 
             let nearest_neighbors = lmi.search_multiple_buckets(&query, &bucket_ids.i((i, ..)), k);
+            // let nearest_neighbors = lmi.search(&query, k);
 
             let ground_truth = (X - query)
                 .pow(&Tensor::from(2.0))
@@ -436,6 +487,7 @@ fn main() {
 
     println!("Avg. Recall: {}", recall_sum / n as f64);
     println!("Recall evaluated in {:?}", now.elapsed());
+
 
     // let ground_truth = query
     //     .dist(&X)
