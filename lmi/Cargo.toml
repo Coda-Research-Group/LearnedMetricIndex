@@ -1,0 +1,21 @@
+[package]
+name = "lmi"
+version = "0.1.0"
+edition = "2024"
+
+
+[lib]
+name = "lmi"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.21.0", features = ["extension-module"] }
+pyo3-tch = "0.18.1"
+torch-sys = "0.18.1"
+tch = "0.18.1"
+half = "2.4.1"
+hdf5 = { package = "hdf5-metno", version = "0.10.0", features = ["f16"] }
+kmeans = "1.1.0"
+ndarray = "=0.16.1"
+rand = { version = "0.8.5", features = ["small_rng"] }
+rayon = "1.10.0"
