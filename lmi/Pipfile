@@ -6,6 +6,7 @@ name = "pypi"
 [packages]
 torch = "==2.5.1"
 numpy = "*"
+h5py = "*"
 
 [dev-packages]
 ipykernel = "*"

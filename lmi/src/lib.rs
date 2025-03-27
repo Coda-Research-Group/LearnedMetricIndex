@@ -1,12 +1,12 @@
 #![allow(non_snake_case)]
 
-use std::collections::{HashMap, HashSet};
 use half::f16;
+use std::collections::{HashMap, HashSet};
 
 use tch::data::Iter2;
 use tch::kind::Kind;
 use tch::nn::{self, Module, OptimizerConfig, Sequential};
-use tch::{no_grad, Device, IndexOp, Tensor};
+use tch::{Device, IndexOp, Tensor, no_grad};
 
 use ndarray::Array2;
 
@@ -16,10 +16,8 @@ use rand::SeedableRng;
 
 use std::time::Instant;
 
-
 use pyo3::prelude::*;
-use pyo3_tch::{wrap_tch_err, PyTensor};
-
+use pyo3_tch::{PyTensor, wrap_tch_err};
 
 const SEED: i64 = 42;
 
@@ -34,7 +32,7 @@ struct RustLmi {
 }
 
 impl RustLmi {
-    fn new(n_buckets: i64, data_dimensionality: i64, vs: &nn::VarStore) -> Self {
+    fn new(n_buckets: i64, data_dimensionality: i64, vs: &nn::VarStore, epochs: i64) -> Self {
         let path = &vs.root();
 
         let model = nn::seq()
@@ -58,7 +56,7 @@ impl RustLmi {
             bucket_data: HashMap::new(),
             bucket_data_ids: HashMap::new(),
             model,
-            epochs: 1,
+            epochs,
             optimizer,
         }
     }
@@ -70,8 +68,12 @@ impl RustLmi {
         println!("Running k-means...");
         let now = Instant::now();
         let v = Vec::<f32>::try_from(X.reshape([X.numel() as i64])).unwrap();
-        let kmeans: KMeans<_, 8, _> =
-            KMeans::new(v, X.size()[0] as usize, self.dimensionality as usize, EuclideanDistance);
+        let kmeans: KMeans<_, 8, _> = KMeans::new(
+            v,
+            X.size()[0] as usize,
+            self.dimensionality as usize,
+            EuclideanDistance,
+        );
         // Create seeded rng for reproducibility
         let rnd = rand::rngs::SmallRng::seed_from_u64(SEED as u64);
 
@@ -92,7 +94,7 @@ impl RustLmi {
             .build();
 
         let kmeans = kmeans.kmeans_minibatch(
-            8192,
+            4096,
             // 16384,
             self.n_buckets as usize,
             100,
@@ -123,7 +125,7 @@ impl RustLmi {
         let train_loader = Iter2::new(X, &y, 256).collect::<Vec<_>>();
 
         // Train the model
-        for epoch in 1..self.epochs {
+        for epoch in 1..=self.epochs {
             for (X_batch, y_batch) in &train_loader {
                 let loss = self
                     .model
@@ -183,42 +185,6 @@ impl RustLmi {
         bucket_data_ids.index(&[Some(indices)])
     }
 
-    // Search in multiple buckets and find closest k neighbors out of ALL of them
-    // fn search_multiple_buckets(&self, query: &Tensor, k: i64, num_buckets: i64) -> Tensor {
-    //     let bucket_ids = self.predict(query, num_buckets).1;
-
-    //     let mut all_dists = Vec::new();
-    //     let mut all_data_ids = Vec::new();
-
-    //     // Loop over each predicted bucket
-    //     for i in 0..num_buckets {
-    //         let bucket_id = bucket_ids.int64_value(&[i]);
-    //         if let Some(bucket_data) = self.bucket_data.get(&bucket_id) {
-    //             if let Some(bucket_data_ids) = self.bucket_data_ids.get(&bucket_id) {
-    //                 // Calculate distances from the query to the items in this bucket
-    //                 let dists = (bucket_data - query)
-    //                     .pow(&Tensor::from(2.0))
-    //                     .sum_dim_intlist(1, false, Kind::Float)
-    //                     .sqrt();
-
-    //                 // Collect distances and corresponding data IDs
-    //                 all_dists.push(dists);
-    //                 all_data_ids.push(bucket_data_ids);
-    //             }
-    //         }
-    //     }
-
-    //     // Concatenate distances and data IDs from all buckets
-    //     let all_dists = Tensor::cat(&all_dists, 0);
-    //     let all_data_ids = Tensor::cat(&all_data_ids, 0);
-
-    //     // Sort all distances and get the top k closest ones
-    //     let indices = all_dists.sort(0, false).1.i((..k,));
-
-    //     // Return the data IDs corresponding to the top k closest items
-    //     all_data_ids.index(&[Some(indices)])
-    // }
-
     fn search_multiple_buckets(&self, query: &Tensor, bucket_ids: &Tensor, k: i64) -> Tensor {
         let num_buckets = bucket_ids.size()[0];
         let mut all_dists = Vec::new();
@@ -261,27 +227,57 @@ impl RustLmi {
     }
 }
 
+fn to_raw_ptr<T>(x: &T) -> usize {
+    let x_ptr = x as *const T;
+    x_ptr as *const usize as usize
+}
+
+fn from_raw_ptr<'a, T>(raw_ptr: usize) -> &'a T {
+    unsafe { &*(raw_ptr as *const T) }
+}
+
+
 #[pyclass]
-struct Lmi {
+struct LMI {
     rust_object: RustLmi,
 }
 
 #[pymethods]
-impl Lmi {
+impl LMI {
     #[new]
-    fn new(n_buckets: i64, data_dimensionality: i64) -> Self {
+    fn new(n_buckets: i64, data_dimensionality: i64, epochs: i64) -> Self {
         let vs = nn::VarStore::new(Device::cuda_if_available());
-        Lmi { rust_object: RustLmi::new(n_buckets, data_dimensionality, &vs) }
+        LMI {
+            rust_object: RustLmi::new(n_buckets, data_dimensionality, &vs, epochs),
+        }
     }
 
     fn train(&mut self, X: PyTensor) {
-        self.rust_object.train(&X);
+        let raw_ptr = to_raw_ptr(&X);
+        Python::with_gil(|py| {
+            py.allow_threads(|| {
+                let X = from_raw_ptr::<Tensor>(raw_ptr);
+                self.rust_object.train(&X);
+            });
+        });
+    }
+
+    fn search(&self, query: PyTensor, k: i64) -> PyTensor {
+        PyTensor(self.rust_object.search(&query, k))
+    }
+
+    fn search_multiple_buckets(&self, query: PyTensor, k: i64) -> PyTensor {
+        let bucket_ids = self.rust_object.predict(&query, 10).1;
+
+        // let empty_tensor = Tensor::from_slice(&[]);
+        // PyTensor(empty_tensor)
+        PyTensor(self.rust_object.search_multiple_buckets(&query, &bucket_ids, k))
     }
 }
 
 #[pymodule]
 fn lmi(py: Python<'_>, m: &PyModule) -> PyResult<()> {
     py.import("torch")?;
-    m.add_class::<Lmi>()?;
+    m.add_class::<LMI>()?;
     Ok(())
 }
