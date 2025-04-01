@@ -5,14 +5,14 @@ name = "pypi"
 
 [packages]
 torch = "==2.5.1"
-patchelf = "*"
-
-[dev-packages]
-ipykernel = "*"
+patchelf = "==0.17.2.2"
 numpy = "==2.2.4"
 h5py = "==3.13.0"
 tqdm = "==4.67.1"
 maturin = "==1.8.3"
+
+[dev-packages]
+ipykernel = "*"
 
 [requires]
 python_version = "3.11"
