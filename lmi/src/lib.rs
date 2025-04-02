@@ -63,8 +63,6 @@ impl RustLmi {
         assert_eq!(self.dimensionality, X.size()[1]);
 
         // Run k-means to obtain training labels
-        println!("Running k-means...");
-        let now = Instant::now();
         let v = Vec::<f32>::try_from(X.reshape([X.numel() as i64])).unwrap();
         let kmeans: KMeans<_, 8, _> = KMeans::new(
             v,
@@ -106,7 +104,6 @@ impl RustLmi {
         //     // &KMeansConfig::default(),
         //     &conf,
         // );
-        println!("K-means finished in {:?}", now.elapsed());
 
         // Prepare the data loader for training
         // let dataset = LMIDataset::new(X.shallow_clone(), y);
@@ -116,9 +113,6 @@ impl RustLmi {
             .map(|&x| x as i64)
             .collect::<Vec<i64>>();
         let y: Tensor = Tensor::from_slice(&assignments);
-
-        println!("Training the model...");
-        let now = Instant::now();
 
         let train_loader = Iter2::new(X, &y, 256).collect::<Vec<_>>();
 
@@ -163,8 +157,6 @@ impl RustLmi {
                     .reshape([-1]),
             );
         }
-
-        println!("Training completed in {:?}", now.elapsed());
     }
 
     #[allow(unused)]
