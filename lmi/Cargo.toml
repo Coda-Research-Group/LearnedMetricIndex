@@ -9,7 +9,7 @@ name = "lmi"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.21.0", features = ["extension-module"] }
+pyo3 = { version = "0.21.2", features = ["extension-module"] }
 pyo3-tch = "0.18.1"
 torch-sys = "0.18.1"
 tch = "0.18.1"

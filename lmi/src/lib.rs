@@ -1,14 +1,12 @@
 #![allow(non_snake_case)]
+#![allow(unsafe_op_in_unsafe_fn)]
 
-use half::f16;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use tch::data::Iter2;
 use tch::kind::Kind;
 use tch::nn::{self, Module, OptimizerConfig, Sequential};
 use tch::{Device, IndexOp, Tensor, no_grad};
-
-use ndarray::Array2;
 
 use kmeans::{EuclideanDistance, KMeans, KMeansConfig};
 
@@ -17,7 +15,7 @@ use rand::SeedableRng;
 use std::time::Instant;
 
 use pyo3::prelude::*;
-use pyo3_tch::{PyTensor, wrap_tch_err};
+use pyo3_tch::PyTensor;
 
 const SEED: i64 = 42;
 
@@ -236,7 +234,7 @@ fn from_raw_ptr<'a, T>(raw_ptr: usize) -> &'a T {
     unsafe { &*(raw_ptr as *const T) }
 }
 
-
+#[allow(clippy::upper_case_acronyms)]
 #[pyclass]
 struct LMI {
     rust_object: RustLmi,
@@ -257,7 +255,7 @@ impl LMI {
         Python::with_gil(|py| {
             py.allow_threads(|| {
                 let X = from_raw_ptr::<Tensor>(raw_ptr);
-                self.rust_object.train(&X);
+                self.rust_object.train(X);
             });
         });
     }
@@ -271,13 +269,16 @@ impl LMI {
 
         // let empty_tensor = Tensor::from_slice(&[]);
         // PyTensor(empty_tensor)
-        PyTensor(self.rust_object.search_multiple_buckets(&query, &bucket_ids, k))
+        PyTensor(
+            self.rust_object
+                .search_multiple_buckets(&query, &bucket_ids, k),
+        )
     }
 }
 
 #[pymodule]
-fn lmi(py: Python<'_>, m: &PyModule) -> PyResult<()> {
-    py.import("torch")?;
+fn lmi(py: Python<'_>, m: Bound<'_, PyModule>) -> PyResult<()> {
+    py.import_bound("torch")?;
     m.add_class::<LMI>()?;
     Ok(())
 }
