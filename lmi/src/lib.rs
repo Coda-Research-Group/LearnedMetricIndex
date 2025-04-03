@@ -2,6 +2,7 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 use tch::data::Iter2;
 use tch::kind::Kind;
@@ -12,12 +13,26 @@ use kmeans::{EuclideanDistance, KMeans, KMeansConfig};
 
 use rand::SeedableRng;
 
-use std::time::Instant;
-
 use pyo3::prelude::*;
 use pyo3_tch::PyTensor;
 
 const SEED: i64 = 42;
+
+#[allow(unused)]
+fn to_raw_ptr<T>(x: &T) -> usize {
+    let x_ptr = x as *const T;
+    x_ptr as *const usize as usize
+}
+
+#[allow(unused)]
+fn from_raw_ptr<'a, T>(raw_ptr: usize) -> &'a T {
+    unsafe { &*(raw_ptr as *const T) }
+}
+
+#[allow(unused)]
+fn from_raw_ptr_mut<'a, T>(raw_ptr: usize) -> &'a mut T {
+    unsafe { &mut *(raw_ptr as *mut T) }
+}
 
 struct RustLmi {
     n_buckets: i64,
@@ -93,7 +108,7 @@ impl RustLmi {
             4096,
             // 16384,
             self.n_buckets as usize,
-            100,
+            10,
             KMeans::init_random_sample,
             &conf,
         );
@@ -209,21 +224,104 @@ impl RustLmi {
         all_data_ids.index(&[Some(indices)])
     }
 
+    #[allow(unused)]
+    fn search_raw(&self, query: &Tensor, k: i64) -> Tensor {
+        let bucket_id = self.predict(query, 1).1.int64_value(&[]);
+        let bucket_data = self.bucket_data.get(&bucket_id).unwrap();
+        let bucket_data_ids = self.bucket_data_ids.get(&bucket_id).unwrap();
+
+        let query_ptr: *const f32 = query.data_ptr() as *const f32;
+        let query_size = query.size()[1] as usize;
+        let query_slice = unsafe { std::slice::from_raw_parts(query_ptr, query_size) };
+
+        let mut dists: Vec<(f32, i64)> = Vec::with_capacity(bucket_data.size()[0] as usize);
+        let bucket_data_ptr: *const f32 = bucket_data.data_ptr() as *const f32;
+        let num_vectors = bucket_data.size()[0] as usize;
+        let vector_dim = bucket_data.size()[1] as usize;
+
+        for i in 0..num_vectors {
+            let bucket_vector = unsafe {
+                std::slice::from_raw_parts(bucket_data_ptr.add(i * vector_dim), vector_dim)
+            };
+
+            let mut dist_squared = 0.0_f32;
+            for j in 0..vector_dim {
+                let diff = bucket_vector[j] - query_slice[j];
+                dist_squared += diff * diff;
+            }
+
+            dists.push((dist_squared.sqrt(), i as i64));
+        }
+
+        dists.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        let indices =
+            Tensor::from_slice(&dists.iter().map(|(_, i)| *i).collect::<Vec<i64>>()[..k as usize]);
+
+        bucket_data_ids.index(&[Some(indices)])
+    }
+
+    #[allow(unused)]
+    fn search_raw_parallel(&self, query: &Tensor, k: i64) -> Tensor {
+        let bucket_id = self.predict(query, 1).1.int64_value(&[]);
+        let bucket_data = self.bucket_data.get(&bucket_id).unwrap();
+        let bucket_data_ids = self.bucket_data_ids.get(&bucket_id).unwrap();
+
+        let query_ptr: *const f32 = query.data_ptr() as *const f32;
+        let query_size = query.size()[1] as usize;
+        let query_slice = unsafe { std::slice::from_raw_parts(query_ptr, query_size) };
+
+        let bucket_data_ptr: *const f32 = bucket_data.data_ptr() as *const f32;
+        let num_vectors = bucket_data.size()[0] as usize;
+        let vector_dim = bucket_data.size()[1] as usize;
+
+        // Create a slice of all bucket data; this is safe because it's read-only
+        let bucket_slice =
+            unsafe { std::slice::from_raw_parts(bucket_data_ptr, num_vectors * vector_dim) };
+
+        // Initialize the vector with default values
+        let mut dists = vec![(0.0, 0); num_vectors];
+
+        // Use Rayon's parallel iterator to process vectors in parallel
+        use rayon::prelude::*;
+        dists.par_iter_mut().enumerate().for_each(|(i, dist_item)| {
+            // Calculate the start and end indices for this vector in the bucket_slice
+            let start = i * vector_dim;
+            let end = start + vector_dim;
+            let bucket_vector = &bucket_slice[start..end];
+
+            let mut dist_squared = 0.0_f32;
+            for j in 0..vector_dim {
+                let diff = bucket_vector[j] - query_slice[j];
+                dist_squared += diff * diff;
+            }
+
+            *dist_item = (dist_squared.sqrt(), i as i64);
+        });
+
+        dists.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        let indices =
+            Tensor::from_slice(&dists.iter().map(|(_, i)| *i).collect::<Vec<i64>>()[..k as usize]);
+
+        bucket_data_ids.index(&[Some(indices)])
+    }
+
+    #[allow(unused)]
+    fn search_multiple(&self, queries: &Tensor, k: i64) -> Tensor {
+        let num_queries = queries.size()[0];
+        let mut all_results: Vec<Tensor> = Vec::with_capacity(num_queries as usize);
+        let (_, bucket_predictions) = self.predict(queries, 1);
+
+        // let data_ptr: *const f32 = queries.data_ptr();
+
+        Tensor::stack(&all_results, 0)
+    }
+
     fn predict(&self, X: &Tensor, top_k: i64) -> (Tensor, Tensor) {
         no_grad(|| {
             let logits = self.model.forward(X);
             logits.softmax(-1, Kind::Float).topk(top_k, -1, true, true)
         })
     }
-}
-
-fn to_raw_ptr<T>(x: &T) -> usize {
-    let x_ptr = x as *const T;
-    x_ptr as *const usize as usize
-}
-
-fn from_raw_ptr<'a, T>(raw_ptr: usize) -> &'a T {
-    unsafe { &*(raw_ptr as *const T) }
 }
 
 #[allow(clippy::upper_case_acronyms)]
@@ -265,6 +363,129 @@ impl LMI {
             self.rust_object
                 .search_multiple_buckets(&query, &bucket_ids, k),
         )
+    }
+
+    fn search_raw(&self, query: PyTensor, k: i64) -> PyTensor {
+        PyTensor(self.rust_object.search_raw(&query, k))
+    }
+
+    fn search_raw_parallel(&self, query: PyTensor, k: i64) -> PyTensor {
+        PyTensor(self.rust_object.search_raw_parallel(&query, k))
+    }
+
+    fn search_multiple(&self, queries: PyTensor, k: i64) -> PyTensor {
+        PyTensor(self.rust_object.search_multiple(&queries, k))
+    }
+
+    fn test_read_raw_tensor(&self) {
+        let t = Tensor::from_slice(&[1, 2, 3]);
+
+        let tensor_data = t.data_ptr() as *const i32;
+        let tensor_size = t.size()[0] as usize;
+        let tensor_slice = unsafe { std::slice::from_raw_parts(tensor_data, tensor_size) };
+
+        let expected = [1, 2, 3];
+        for i in 0..tensor_size {
+            assert_eq!(tensor_slice[i], expected[i]);
+        }
+    }
+
+    fn test_read_raw_tensor_f32(&self) {
+        let t = Tensor::from_slice(&[1.0, 2.0, 3.0]).to_kind(Kind::Float);
+
+        let tensor_data = t.data_ptr() as *const f32;
+        let tensor_size = t.size()[0] as usize;
+        let tensor_slice = unsafe { std::slice::from_raw_parts(tensor_data, tensor_size) };
+
+        let expected = [1.0, 2.0, 3.0];
+
+        for i in 0..tensor_size {
+            assert_eq!(tensor_slice[i], expected[i]);
+        }
+    }
+
+    fn test_read_raw_tensor_multidim(&self) {
+        let t = Tensor::from_slice(&[
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+        ])
+        .reshape(&[3, 4])
+        .to_kind(Kind::Float);
+
+        let tensor_data = t.data_ptr() as *const f32;
+
+        let rows = t.size()[0] as usize;
+        let cols = t.size()[1] as usize;
+
+        let tensor_slice = unsafe { std::slice::from_raw_parts(tensor_data, rows * cols) };
+
+        let expected = [
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+        ];
+
+        for y in 0..rows {
+            for x in 0..cols {
+                let i = y * cols + x;
+                assert_eq!(tensor_slice[i], expected[i]);
+            }
+        }
+    }
+
+    fn test_modify_raw_tensor(&self) {
+        let t = Tensor::from_slice(&[1, 2, 3]);
+
+        let tensor_data = t.data_ptr() as *mut i32;
+        let tensor_size = t.size()[0] as usize;
+        let tensor_slice = unsafe { std::slice::from_raw_parts_mut(tensor_data, tensor_size) };
+
+        tensor_slice[0] = 4;
+
+        let expected = [4, 2, 3];
+        for i in 0..tensor_size {
+            assert_eq!(tensor_slice[i], expected[i]);
+        }
+    }
+
+    fn test_modify_raw_multidim(&self) {
+        let t = Tensor::from_slice(&[
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+        ])
+        .reshape(&[3, 4])
+        .to_kind(Kind::Float);
+
+        let tensor_data = t.data_ptr() as *mut f32;
+
+        let rows = t.size()[0] as usize;
+        let cols = t.size()[1] as usize;
+
+        let tensor_slice = unsafe { std::slice::from_raw_parts_mut(tensor_data, rows * cols) };
+
+        for y in 0..rows {
+            let i = y * cols;
+            tensor_slice[i] = 100.0;
+        }
+
+        let expected = [
+            100.0, 2.0, 3.0, 4.0, 100.0, 6.0, 7.0, 8.0, 100.0, 10.0, 11.0, 12.0,
+        ];
+
+        for y in 0..rows {
+            for x in 0..cols {
+                let i = y * cols + x;
+                assert_eq!(tensor_slice[i], expected[i]);
+            }
+        }
+    }
+
+    fn tests(&self) {
+        println!("Running tests...");
+
+        self.test_read_raw_tensor();
+        self.test_read_raw_tensor_f32();
+        self.test_read_raw_tensor_multidim();
+        self.test_modify_raw_tensor();
+        self.test_modify_raw_multidim();
+
+        println!("Tests passed!");
     }
 }
 

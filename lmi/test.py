@@ -24,26 +24,30 @@ n, d = X.shape
 
 # Create an instance of the LMI
 lmi = LMI(n_buckets=320, data_dimensionality=d, epochs=1)
+lmi.tests()
 lmi.train(X)
 
-n = len(X)
-print(f"Evaluating on {n} queries...")
+
 now = time.time()
 
 print("Loading queries...")
 queries_path = Path("../data2024/public-queries-2024-laion2B-en-clip768v2-n=10k.h5")
 queries = torch.from_numpy(h5py.File(queries_path, "r")["emb"][:]).to(torch.float32)  # type: ignore
 
+n = len(queries)
+queries = queries[torch.randperm(queries.shape[0])[:n]]
+print(f"Evaluating on {n} queries...")
+
 k = 10
 recall_sum = 0
 
-queries = queries[torch.randperm(queries.shape[0])[:n]]
-
+# nearest_neighbors = lmi.search_multiple(queries, k)
 for query in tqdm(queries):
-    nearest_neighbors = lmi.search(query.unsqueeze(0), k)
+    nearest_neighbors = lmi.search_raw_parallel(query.unsqueeze(0), k)
     # ground_truth = torch.argsort(torch.cdist(query.unsqueeze(0), X)).reshape(-1)[:k]
     # recall = len(set(nearest_neighbors.tolist()).intersection(set(ground_truth.tolist())))/k
     # recall_sum += recall
+
 
 # print(f"Ground truth: {ground_truth}")
 # print(f"Predicted: {nearest_neighbors}")
