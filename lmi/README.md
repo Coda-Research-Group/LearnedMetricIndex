@@ -19,7 +19,7 @@ pip install pipenv
 2. Install all dependencies specified in Pipfile.lock
 
 ```bash
-pipenv sync
+pipenv --python python3.11 sync
 ```
 
 3. Activate the virtual environment
@@ -38,9 +38,9 @@ RUSTFLAGS="-C linker=gcc" LIBTORCH_USE_PYTORCH=1 maturin develop --release
 From this folder run
 ```bash
 cd .. && mkdir data2024 && cd data2024
-wget https://sisap-23-challenge.s3.amazonaws.com/SISAP23-Challenge/laion2B-en-clip768v2-n=300k.h5
+wget https://sisap-23-challenge.s3.amazonaws.com/SISAP23-Challenge/laion2B-en-clip768v2-n=300K.h5
 wget http://ingeotec.mx/~sadit/sisap2024-data/public-queries-2024-laion2B-en-clip768v2-n=10k.h5
-wget http://ingeotec.mx/~sadit/sisap2024-data/gold-standard-dbsize=300k--public-queries-2024-laion2B-en-clip768v2-n=10k.h5
+wget http://ingeotec.mx/~sadit/sisap2024-data/gold-standard-dbsize=300K--public-queries-2024-laion2B-en-clip768v2-n=10k.h5
 cd ../lmi
 ```
 
