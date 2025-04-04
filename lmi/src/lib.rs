@@ -2,8 +2,6 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
-
 use tch::data::Iter2;
 use tch::kind::Kind;
 use tch::nn::{self, Module, OptimizerConfig, Sequential};
@@ -118,6 +116,8 @@ impl RustLmi {
         Tensor::from_slice(&assignments)
     }
 
+
+    #[allow(unused_variables)]
     fn train_model(&mut self, X: &Tensor, y: &Tensor, epochs: i64, lr: f64) {
         // TODO: epochs and lr should be used
         let train_loader = Iter2::new(X, &y, 256).collect::<Vec<_>>();
@@ -328,7 +328,6 @@ impl LMI {
     }
 
     fn run_kmeans(&mut self, X: PyTensor) -> PyTensor {
-        let raw_ptr = to_raw_ptr(&X);
         PyTensor(self.rust_object.run_kmeans(&X))
     }
 
