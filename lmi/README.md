@@ -43,6 +43,7 @@ wget http://ingeotec.mx/~sadit/sisap2024-data/public-queries-2024-laion2B-en-cli
 wget http://ingeotec.mx/~sadit/sisap2024-data/gold-standard-dbsize=300K--public-queries-2024-laion2B-en-clip768v2-n=10k.h5
 cd ../lmi
 ```
+The first wget will probably not work, so you need to get the dataset from elsewhere :)
 
 ## Running the Project
 
