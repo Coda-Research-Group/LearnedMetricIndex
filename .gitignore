@@ -25,3 +25,5 @@ logs/
 res.csv
 
 data2024/
+data_toy/
+test_faiss

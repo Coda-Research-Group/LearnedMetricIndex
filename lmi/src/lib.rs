@@ -74,10 +74,9 @@ impl RustLmi {
         }
     }
 
-    fn train(&mut self, X: &Tensor) {
+    fn run_kmeans(&self, X: &Tensor) -> Tensor {
         assert_eq!(self.dimensionality, X.size()[1]);
 
-        // Run k-means to obtain training labels
         let v = Vec::<f32>::try_from(X.reshape([X.numel() as i64])).unwrap();
         let kmeans: KMeans<_, 8, _> = KMeans::new(
             v,
@@ -85,53 +84,44 @@ impl RustLmi {
             self.dimensionality as usize,
             EuclideanDistance,
         );
-        // Create seeded rng for reproducibility
         let rnd = rand::rngs::SmallRng::seed_from_u64(SEED as u64);
-
-        // We want to change the rnd to our seeded rng
-        // We can't access the rnd field directly, so we need to create a new KMeansConfig with the seeded rng
 
         let conf: KMeansConfig<f32> = KMeansConfig::build()
             .iteration_done(&|s, nr, new_distsum| {
-                println!(
-                    "Iteration {} - Error: {:.2} -> {:.2} | Improvement: {:.2}",
-                    nr,
-                    s.distsum,
-                    new_distsum,
-                    s.distsum - new_distsum
-                )
+                if nr % 10 == 0 {
+                    println!(
+                        "Iteration {} - Error: {:.2} -> {:.2} | Improvement: {:.2}",
+                        nr,
+                        s.distsum,
+                        new_distsum,
+                        s.distsum - new_distsum
+                    );
+                }
             })
             .random_generator(rnd)
             .build();
 
         let kmeans = kmeans.kmeans_minibatch(
             4096,
-            // 16384,
             self.n_buckets as usize,
-            10,
+            100,
             KMeans::init_random_sample,
             &conf,
         );
-        // let kmeans = kmeans.kmeans_lloyd(
-        //     self.n_buckets as usize,
-        //     15,
-        //     KMeans::init_random_sample,
-        //     // &KMeansConfig::default(),
-        //     &conf,
-        // );
 
-        // Prepare the data loader for training
-        // let dataset = LMIDataset::new(X.shallow_clone(), y);
         let assignments = kmeans
             .assignments
             .iter()
             .map(|&x| x as i64)
             .collect::<Vec<i64>>();
-        let y: Tensor = Tensor::from_slice(&assignments);
 
+        Tensor::from_slice(&assignments)
+    }
+
+    fn train_model(&mut self, X: &Tensor, y: &Tensor, epochs: i64, lr: f64) {
+        // TODO: epochs and lr should be used
         let train_loader = Iter2::new(X, &y, 256).collect::<Vec<_>>();
 
-        // Train the model
         for epoch in 1..=self.epochs {
             for (X_batch, y_batch) in &train_loader {
                 let loss = self
@@ -150,11 +140,11 @@ impl RustLmi {
                     .double_value(&[])
             );
         }
+    }
 
-        // Predict to which bucket each vector belongs
+    fn create_buckets(&mut self, X: &Tensor) {
         let classes = self.predict(X, 1).1.reshape([-1]);
 
-        // Store the vectors and their IDs in the corresponding buckets
         for i in 0..self.n_buckets {
             self.bucket_data.insert(
                 i,
@@ -218,10 +208,10 @@ impl RustLmi {
         let all_data_ids = Tensor::cat(&all_data_ids, 0);
 
         // Sort all distances and get the top k closest ones
-        let indices = all_dists.sort(0, false).1.i((..k,));
+        let dists = all_dists.sort(0, false).1.i((..k,));
 
         // Return the data IDs corresponding to the top k closest items
-        all_data_ids.index(&[Some(indices)])
+        all_data_ids.index(&[Some(dists)])
     }
 
     #[allow(unused)]
@@ -253,7 +243,8 @@ impl RustLmi {
             dists.push((dist_squared.sqrt(), i as i64));
         }
 
-        dists.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        dists.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+        let k = k.min(num_vectors as i64);
         let indices =
             Tensor::from_slice(&dists.iter().map(|(_, i)| *i).collect::<Vec<i64>>()[..k as usize]);
 
@@ -274,33 +265,29 @@ impl RustLmi {
         let num_vectors = bucket_data.size()[0] as usize;
         let vector_dim = bucket_data.size()[1] as usize;
 
-        // Create a slice of all bucket data; this is safe because it's read-only
         let bucket_slice =
             unsafe { std::slice::from_raw_parts(bucket_data_ptr, num_vectors * vector_dim) };
 
-        // Initialize the vector with default values
         let mut dists = vec![(0.0, 0); num_vectors];
 
-        // Use Rayon's parallel iterator to process vectors in parallel
         use rayon::prelude::*;
         dists.par_iter_mut().enumerate().for_each(|(i, dist_item)| {
-            // Calculate the start and end indices for this vector in the bucket_slice
             let start = i * vector_dim;
             let end = start + vector_dim;
             let bucket_vector = &bucket_slice[start..end];
 
-            let mut dist_squared = 0.0_f32;
+            let mut inner = 0.0_f32;
             for j in 0..vector_dim {
-                let diff = bucket_vector[j] - query_slice[j];
-                dist_squared += diff * diff;
+                inner += bucket_vector[j] * query_slice[j];
             }
 
-            *dist_item = (dist_squared.sqrt(), i as i64);
+            *dist_item = (inner, i as i32);
         });
 
-        dists.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        dists.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+        let k = k.min(num_vectors as i64);
         let indices =
-            Tensor::from_slice(&dists.iter().map(|(_, i)| *i).collect::<Vec<i64>>()[..k as usize]);
+            Tensor::from_slice(&dists.iter().map(|(_, i)| *i).collect::<Vec<i32>>()[..k as usize]);
 
         bucket_data_ids.index(&[Some(indices)])
     }
@@ -340,12 +327,29 @@ impl LMI {
         }
     }
 
-    fn train(&mut self, X: PyTensor) {
+    fn run_kmeans(&mut self, X: PyTensor) -> PyTensor {
+        let raw_ptr = to_raw_ptr(&X);
+        PyTensor(self.rust_object.run_kmeans(&X))
+    }
+
+    fn train_model(&mut self, X: PyTensor, y: PyTensor, epochs: i64, lr: f64) {
+        let raw_ptr = to_raw_ptr(&X);
+        let raw_ptr_y = to_raw_ptr(&y);
+        Python::with_gil(|py| {
+            py.allow_threads(|| {
+                let X = from_raw_ptr::<Tensor>(raw_ptr);
+                let y = from_raw_ptr::<Tensor>(raw_ptr_y);
+                self.rust_object.train_model(X, y, epochs, lr);
+            });
+        });
+    }
+
+    fn create_buckets(&mut self, X: PyTensor) {
         let raw_ptr = to_raw_ptr(&X);
         Python::with_gil(|py| {
             py.allow_threads(|| {
                 let X = from_raw_ptr::<Tensor>(raw_ptr);
-                self.rust_object.train(X);
+                self.rust_object.create_buckets(X);
             });
         });
     }
@@ -477,15 +481,11 @@ impl LMI {
     }
 
     fn tests(&self) {
-        println!("Running tests...");
-
         self.test_read_raw_tensor();
         self.test_read_raw_tensor_f32();
         self.test_read_raw_tensor_multidim();
         self.test_modify_raw_tensor();
         self.test_modify_raw_multidim();
-
-        println!("Tests passed!");
     }
 }
 
