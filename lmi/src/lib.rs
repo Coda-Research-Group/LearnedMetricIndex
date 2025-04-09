@@ -38,12 +38,12 @@ struct RustLmi {
     bucket_data: HashMap<i64, Tensor>,
     bucket_data_ids: HashMap<i64, Tensor>,
     model: Sequential,
-    epochs: i64,
-    optimizer: nn::Optimizer,
+    vs: nn::VarStore,
 }
 
 impl RustLmi {
-    fn new(n_buckets: i64, data_dimensionality: i64, vs: &nn::VarStore, epochs: i64) -> Self {
+    fn new(n_buckets: i64, data_dimensionality: i64) -> Self {
+        let vs = nn::VarStore::new(Device::cuda_if_available());
         let path = &vs.root();
 
         let model = nn::seq()
@@ -58,8 +58,6 @@ impl RustLmi {
             .add_fn(|xs| xs.relu())
             .add(nn::linear(path, 384, n_buckets, Default::default()));
 
-        let lr = 0.001;
-        let optimizer = nn::Adam::default().build(vs, lr).unwrap();
 
         RustLmi {
             n_buckets,
@@ -67,8 +65,7 @@ impl RustLmi {
             bucket_data: HashMap::new(),
             bucket_data_ids: HashMap::new(),
             model,
-            epochs,
-            optimizer,
+            vs,
         }
     }
 
@@ -119,16 +116,16 @@ impl RustLmi {
 
     #[allow(unused_variables)]
     fn train_model(&mut self, X: &Tensor, y: &Tensor, epochs: i64, lr: f64) {
-        // TODO: epochs and lr should be used
         let train_loader = Iter2::new(X, &y, 256).collect::<Vec<_>>();
+        let mut optimizer = nn::Adam::default().build(&self.vs, lr).unwrap();
 
-        for epoch in 1..=self.epochs {
+        for epoch in 1..=epochs {
             for (X_batch, y_batch) in &train_loader {
                 let loss = self
                     .model
                     .forward(X_batch)
                     .cross_entropy_for_logits(y_batch);
-                self.optimizer.backward_step(&loss);
+                optimizer.backward_step(&loss);
             }
 
             println!(
@@ -314,23 +311,33 @@ impl RustLmi {
 #[allow(clippy::upper_case_acronyms)]
 #[pyclass]
 struct LMI {
+    #[allow(unused)]
+    #[pyo3(get)]
+    n_buckets: i64,
+    #[allow(unused)]
+    #[pyo3(get)]
+    dimensionality: i64,
     rust_object: RustLmi,
 }
 
 #[pymethods]
 impl LMI {
     #[new]
-    fn new(n_buckets: i64, data_dimensionality: i64, epochs: i64) -> Self {
-        let vs = nn::VarStore::new(Device::cuda_if_available());
+    #[pyo3(signature = (n_buckets, data_dimensionality))]
+    fn new(n_buckets: i64, data_dimensionality: i64) -> Self {
         LMI {
-            rust_object: RustLmi::new(n_buckets, data_dimensionality, &vs, epochs),
+            n_buckets,
+            dimensionality: data_dimensionality,
+            rust_object: RustLmi::new(n_buckets, data_dimensionality),
         }
     }
 
+    #[pyo3(signature = (X))]
     fn run_kmeans(&mut self, X: PyTensor) -> PyTensor {
         PyTensor(self.rust_object.run_kmeans(&X))
     }
 
+    #[pyo3(signature = (X, y, epochs=10, lr=1e-3))]
     fn train_model(&mut self, X: PyTensor, y: PyTensor, epochs: i64, lr: f64) {
         let raw_ptr = to_raw_ptr(&X);
         let raw_ptr_y = to_raw_ptr(&y);
@@ -343,6 +350,8 @@ impl LMI {
         });
     }
 
+
+    #[pyo3(signature = (X))]
     fn create_buckets(&mut self, X: PyTensor) {
         let raw_ptr = to_raw_ptr(&X);
         Python::with_gil(|py| {
@@ -353,10 +362,12 @@ impl LMI {
         });
     }
 
+    #[pyo3(signature = (query, k))]
     fn search(&self, query: PyTensor, k: i64) -> PyTensor {
         PyTensor(self.rust_object.search(&query, k))
     }
 
+    #[pyo3(signature = (query, k))]
     fn search_multiple_buckets(&self, query: PyTensor, k: i64) -> PyTensor {
         let bucket_ids = self.rust_object.predict(&query, 10).1;
 
@@ -368,14 +379,17 @@ impl LMI {
         )
     }
 
+    #[pyo3(signature = (query, k))]
     fn search_raw(&self, query: PyTensor, k: i64) -> PyTensor {
         PyTensor(self.rust_object.search_raw(&query, k))
     }
 
+    #[pyo3(signature = (query, k))]
     fn search_raw_parallel(&self, query: PyTensor, k: i64) -> PyTensor {
         PyTensor(self.rust_object.search_raw_parallel(&query, k))
     }
 
+    #[pyo3(signature = (queries, k))]
     fn search_multiple(&self, queries: PyTensor, k: i64) -> PyTensor {
         PyTensor(self.rust_object.search_multiple(&queries, k))
     }

@@ -34,7 +34,7 @@ X_train = utils.sample_train_subset(
 
 # Create an instance of the LMI
 logger.debug("Creating LMI instance...")
-lmi = LMI(n_buckets=320, data_dimensionality=d, epochs=15)
+lmi = LMI(n_buckets=320, data_dimensionality=d)
 
 logger.debug("Running tests...")
 lmi.tests()
