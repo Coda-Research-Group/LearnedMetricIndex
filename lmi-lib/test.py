@@ -39,17 +39,17 @@ lmi._create_buckets = utils.measure_runtime(lmi._create_buckets)
 logger.debug("Running tests...")
 lmi.run_tests()
 
-# logger.debug("Running kmeans...")
-# y = lmi._run_kmeans(X_train)
+logger.debug("Running kmeans...")
+y = lmi._run_kmeans(X_train)
 
-# logger.debug("Training model...")
-# lmi._train_model(X_train, y, 15, 0.001)
+logger.debug("Training model...")
+lmi._train_model(X_train, y, 15, 0.001)
 
-# logger.debug("Creating buckets...")
-# lmi._create_buckets(X)
+logger.debug("Creating buckets...")
+lmi._create_buckets(X)
 
-logger.debug("Building model...")
-lmi.build(X, 15, 0.001)
+# logger.debug("Building model...")
+# lmi.build(X, 15, 0.001)
 
 now = time.time()
 
