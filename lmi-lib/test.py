@@ -12,10 +12,6 @@ logger.debug(f"Torch version: {torch.__version__}")
 
 import utils
 
-LMI.run_kmeans = utils.measure_runtime(LMI.run_kmeans)
-LMI.train_model = utils.measure_runtime(LMI.train_model)
-LMI.create_buckets = utils.measure_runtime(LMI.create_buckets)
-
 torch.manual_seed(42)
 
 logger.debug("Loading dataset...")
@@ -36,17 +32,24 @@ X_train = utils.sample_train_subset(
 logger.debug("Creating LMI instance...")
 lmi = LMI(n_buckets=320, data_dimensionality=d)
 
+lmi._run_kmeans = utils.measure_runtime(lmi._run_kmeans)
+lmi._train_model = utils.measure_runtime(lmi._train_model)
+lmi._create_buckets = utils.measure_runtime(lmi._create_buckets)
+
 logger.debug("Running tests...")
-lmi.tests()
+lmi.run_tests()
 
-logger.debug("Running kmeans...")
-y = lmi.run_kmeans(X_train)
+# logger.debug("Running kmeans...")
+# y = lmi._run_kmeans(X_train)
 
-logger.debug("Training model...")
-lmi.train_model(X_train, y, 15, 0.001)
+# logger.debug("Training model...")
+# lmi._train_model(X_train, y, 15, 0.001)
 
-logger.debug("Creating buckets...")
-lmi.create_buckets(X)
+# logger.debug("Creating buckets...")
+# lmi._create_buckets(X)
+
+logger.debug("Building model...")
+lmi.build(X, 15, 0.001)
 
 now = time.time()
 

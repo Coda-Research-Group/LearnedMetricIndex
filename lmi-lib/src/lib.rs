@@ -58,7 +58,6 @@ impl RustLmi {
             .add_fn(|xs| xs.relu())
             .add(nn::linear(path, 384, n_buckets, Default::default()));
 
-
         RustLmi {
             n_buckets,
             dimensionality: data_dimensionality,
@@ -112,7 +111,6 @@ impl RustLmi {
 
         Tensor::from_slice(&assignments)
     }
-
 
     #[allow(unused_variables)]
     fn train_model(&mut self, X: &Tensor, y: &Tensor, epochs: i64, lr: f64) {
@@ -323,7 +321,6 @@ struct LMI {
 #[pymethods]
 impl LMI {
     #[new]
-    #[pyo3(signature = (n_buckets, data_dimensionality))]
     fn new(n_buckets: i64, data_dimensionality: i64) -> Self {
         LMI {
             n_buckets,
@@ -332,13 +329,11 @@ impl LMI {
         }
     }
 
-    #[pyo3(signature = (X))]
-    fn run_kmeans(&mut self, X: PyTensor) -> PyTensor {
+    fn _run_kmeans(&mut self, X: PyTensor) -> PyTensor {
         PyTensor(self.rust_object.run_kmeans(&X))
     }
 
-    #[pyo3(signature = (X, y, epochs=10, lr=1e-3))]
-    fn train_model(&mut self, X: PyTensor, y: PyTensor, epochs: i64, lr: f64) {
+    fn _train_model(&mut self, X: PyTensor, y: PyTensor, epochs: i64, lr: f64) {
         let raw_ptr = to_raw_ptr(&X);
         let raw_ptr_y = to_raw_ptr(&y);
         Python::with_gil(|py| {
@@ -350,9 +345,7 @@ impl LMI {
         });
     }
 
-
-    #[pyo3(signature = (X))]
-    fn create_buckets(&mut self, X: PyTensor) {
+    fn _create_buckets(&mut self, X: PyTensor) {
         let raw_ptr = to_raw_ptr(&X);
         Python::with_gil(|py| {
             py.allow_threads(|| {
@@ -362,12 +355,10 @@ impl LMI {
         });
     }
 
-    #[pyo3(signature = (query, k))]
     fn search(&self, query: PyTensor, k: i64) -> PyTensor {
         PyTensor(self.rust_object.search(&query, k))
     }
 
-    #[pyo3(signature = (query, k))]
     fn search_multiple_buckets(&self, query: PyTensor, k: i64) -> PyTensor {
         let bucket_ids = self.rust_object.predict(&query, 10).1;
 
@@ -379,17 +370,14 @@ impl LMI {
         )
     }
 
-    #[pyo3(signature = (query, k))]
     fn search_raw(&self, query: PyTensor, k: i64) -> PyTensor {
         PyTensor(self.rust_object.search_raw(&query, k))
     }
 
-    #[pyo3(signature = (query, k))]
     fn search_raw_parallel(&self, query: PyTensor, k: i64) -> PyTensor {
         PyTensor(self.rust_object.search_raw_parallel(&query, k))
     }
 
-    #[pyo3(signature = (queries, k))]
     fn search_multiple(&self, queries: PyTensor, k: i64) -> PyTensor {
         PyTensor(self.rust_object.search_multiple(&queries, k))
     }
@@ -493,7 +481,7 @@ impl LMI {
         }
     }
 
-    fn tests(&self) {
+    fn run_tests(&self) {
         self.test_read_raw_tensor();
         self.test_read_raw_tensor_f32();
         self.test_read_raw_tensor_multidim();
