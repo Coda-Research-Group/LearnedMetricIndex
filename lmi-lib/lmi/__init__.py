@@ -1,10 +1,13 @@
 from .lmi import LMI as LMIBase
+from .helpers import extract_model_config
 
 import torch
 
 class LMI:
-    def __init__(self, *args, **kwargs):
-        self._inner = LMIBase(*args, **kwargs)
+    def __init__(self, model, *args, **kwargs):
+        model_config = extract_model_config(model)
+        print(model_config)
+        self._inner = LMIBase(model_config, *args, **kwargs)
 
     def __getattr__(self, name):
         return getattr(self._inner, name)

@@ -454,6 +454,8 @@ dependencies = [
  "pyo3-tch",
  "rand",
  "rayon",
+ "serde",
+ "serde_json",
  "tch",
  "torch-sys",
 ]

@@ -14,6 +14,9 @@ use rand::SeedableRng;
 use pyo3::prelude::*;
 use pyo3_tch::PyTensor;
 
+use serde::Deserialize;
+use serde_json;
+
 const SEED: i64 = 42;
 
 #[allow(unused)]
@@ -32,6 +35,33 @@ fn from_raw_ptr_mut<'a, T>(raw_ptr: usize) -> &'a mut T {
     unsafe { &mut *(raw_ptr as *mut T) }
 }
 
+#[derive(Deserialize, Debug)]
+#[serde(tag = "type")]
+enum LayerConfig {
+    #[serde(rename = "linear")]
+    Linear { fanin: i64, fanout: i64 },
+    #[serde(rename = "relu")]
+    Relu,
+}
+
+fn create_model_from_json(model_json: &str, path: &nn::Path) -> Sequential {
+    let layers: Vec<LayerConfig> = serde_json::from_str(model_json).unwrap();
+    let mut seq = nn::seq();
+
+    for layer in layers {
+        match layer {
+            LayerConfig::Linear { fanin, fanout } => {
+                seq = seq.add(nn::linear(path, fanin, fanout, Default::default()));
+            }
+            LayerConfig::Relu => {
+                seq = seq.add_fn(|xs| xs.relu());
+            }
+        }
+    }
+
+    seq
+}
+
 struct RustLmi {
     n_buckets: i64,
     dimensionality: i64,
@@ -42,21 +72,11 @@ struct RustLmi {
 }
 
 impl RustLmi {
-    fn new(n_buckets: i64, data_dimensionality: i64) -> Self {
+    fn new(model_json: &str, n_buckets: i64, data_dimensionality: i64) -> Self {
         let vs = nn::VarStore::new(Device::cuda_if_available());
         let path = &vs.root();
 
-        let model = nn::seq()
-            .add(nn::linear(
-                path,
-                data_dimensionality,
-                512,
-                Default::default(),
-            ))
-            .add_fn(|xs| xs.relu())
-            .add(nn::linear(path, 512, 384, Default::default()))
-            .add_fn(|xs| xs.relu())
-            .add(nn::linear(path, 384, n_buckets, Default::default()));
+        let model = create_model_from_json(model_json, path);
 
         RustLmi {
             n_buckets,
@@ -321,11 +341,11 @@ struct LMI {
 #[pymethods]
 impl LMI {
     #[new]
-    fn new(n_buckets: i64, data_dimensionality: i64) -> Self {
+    fn new(model_json: &str, n_buckets: i64, data_dimensionality: i64) -> Self {
         LMI {
             n_buckets,
             dimensionality: data_dimensionality,
-            rust_object: RustLmi::new(n_buckets, data_dimensionality),
+            rust_object: RustLmi::new(model_json, n_buckets, data_dimensionality),
         }
     }
 

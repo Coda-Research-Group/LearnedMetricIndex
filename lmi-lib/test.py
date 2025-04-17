@@ -28,9 +28,19 @@ X_train = utils.sample_train_subset(
     dataset, n_data, data_dim, sample_size, chunk_size
 ).to(torch.float32)
 
+n_buckets = 320
+
+model = torch.nn.Sequential(
+    torch.nn.Linear(d, 512),
+    torch.nn.ReLU(),
+    torch.nn.Linear(512, 384),
+    torch.nn.ReLU(),
+    torch.nn.Linear(384, n_buckets),
+)
+
 # Create an instance of the LMI
 logger.debug("Creating LMI instance...")
-lmi = LMI(n_buckets=320, data_dimensionality=d)
+lmi = LMI(model=model, n_buckets=n_buckets, data_dimensionality=d)
 
 lmi._run_kmeans = utils.measure_runtime(lmi._run_kmeans)
 lmi._train_model = utils.measure_runtime(lmi._train_model)
