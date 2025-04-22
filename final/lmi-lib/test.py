@@ -16,7 +16,7 @@ torch.manual_seed(42)
 
 logger.debug("Loading dataset...")
 dataset_size = "300K"
-dataset = Path(f"../data2024/laion2B-en-clip768v2-n={dataset_size}.h5")
+dataset = Path(f"../../data2024/laion2B-en-clip768v2-n={dataset_size}.h5")
 sample_size = 100000
 chunk_size = 100000
 d = 768
@@ -53,7 +53,7 @@ logger.debug("Running kmeans...")
 y = lmi._run_kmeans(X_train)
 
 logger.debug("Training model...")
-lmi._train_model(X_train, y, 15, 0.001)
+lmi._train_model(X_train, y, 1, 0.001)
 
 logger.debug("Creating buckets...")
 lmi._create_buckets(X)
@@ -72,7 +72,7 @@ def search(queries, k):
     # nearest_neighbors = lmi.search_multiple(queries, k)
     for i, query in enumerate(tqdm(queries)):
         result = (
-                lmi.search_raw_parallel(query.unsqueeze(0), k).detach().cpu().numpy()
+                lmi.search_raw(query.unsqueeze(0), k).detach().cpu().numpy()
             )
         nearest_neighbors[i][:len(result)] = result # If lmi returns less than k results, the rest is left as 0
     return nearest_neighbors
@@ -80,6 +80,7 @@ def search(queries, k):
 logger.debug("Searching...")
 k = 30
 nearest_neighbors = search(queries, k)
+# nearest_neighbors = lmi.search_multiple(queries, k)
 
 identifier = f"lmi"
 utils.store_results(

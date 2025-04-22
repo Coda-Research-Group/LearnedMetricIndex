@@ -1,15 +1,9 @@
 [package]
-name = "lmi"
+name = "rust-lmi"
 version = "0.1.0"
 edition = "2024"
 
-[lib]
-name = "lmi"
-crate-type = ["cdylib"]
-
 [dependencies]
-pyo3 = { version = "0.21.2", features = ["extension-module"] }
-pyo3-tch = "0.18.1"
 torch-sys = "0.18.1"
 tch = "0.18.1"
 half = "2.4.1"
@@ -21,8 +15,10 @@ rayon = "1.10.0"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 
-[profile.release]
-opt-level = 3
-lto = "fat"
-codegen-units = 1
-debug = true
+[dev-dependencies]
+rand = { version = "0.8.5", features = ["small_rng"] }
+criterion = "0.5.1"
+
+[[bench]]
+name = "dot_product"
+harness = false

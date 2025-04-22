@@ -6,7 +6,6 @@ import torch
 class LMI:
     def __init__(self, model, *args, **kwargs):
         model_config = extract_model_config(model)
-        print(model_config)
         self._inner = LMIBase(model_config, *args, **kwargs)
 
     def __getattr__(self, name):

@@ -15,7 +15,7 @@ import h5py
 
 
 def get_groundtruth(size: str = '300K'):
-    out_fn = Path(f'../data2024/gold-standard-dbsize={size}--public-queries-2024-laion2B-en-clip768v2-n=10k.h5')
+    out_fn = Path(f'../../data2024/gold-standard-dbsize={size}--public-queries-2024-laion2B-en-clip768v2-n=10k.h5')
     gt_f = h5py.File(out_fn, 'r')
     true_I = np.array(gt_f['knns'])
     gt_f.close()
