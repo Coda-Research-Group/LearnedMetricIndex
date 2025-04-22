@@ -71,6 +71,10 @@ impl LMI {
         PyTensor(self.rust_object.search_raw(&query, k))
     }
 
+    fn search_raw_multiple(&self, queries: PyTensor, k: i64) -> PyTensor {
+        PyTensor(self.rust_object.search_raw_multiple(&queries, k))
+    }
+
     fn test_read_raw_tensor(&self) {
         let t = Tensor::from_slice(&[1, 2, 3]);
 

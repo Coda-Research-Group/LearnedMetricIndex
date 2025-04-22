@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use tch::data::Iter2;
 use tch::kind::Kind;
 use tch::nn::{self, Module, OptimizerConfig, Sequential};
-use tch::{no_grad, Device, IndexOp, Tensor};
+use tch::{Device, IndexOp, Tensor, no_grad};
 
 use kmeans::{EuclideanDistance, KMeans, KMeansConfig};
 
@@ -18,7 +18,7 @@ use serde_json;
 use rayon::prelude::*;
 
 pub mod helpers;
-use helpers::dot_product_avx;
+use helpers::{dot_product_avx, from_raw_ptr, to_raw_ptr};
 
 const SEED: i64 = 42;
 
@@ -229,14 +229,95 @@ impl RustLmi {
 
         let k = k.min(num_vectors as i64);
         let pivot_index = num_vectors - k as usize;
-        similarities.select_nth_unstable_by(pivot_index, |a, b| b.0.partial_cmp(&a.0).unwrap());
+        similarities.select_nth_unstable_by(pivot_index, |a, b| a.0.partial_cmp(&b.0).unwrap());
 
         let mut results = similarities[pivot_index..].to_vec();
         results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
         let indices = results.iter().map(|(_, i)| *i).collect::<Vec<i32>>();
         let indices = Tensor::from_slice(&indices);
 
+
         bucket_data_ids.index(&[Some(indices)])
+    }
+
+    pub fn search_raw_multiple(&self, queries: &Tensor, k: i64) -> Tensor {
+        let (_, bucket_ids) = self.predict(queries, 1);
+        let n_queries = queries.size()[0];
+
+        let mut all_results = Vec::with_capacity(n_queries as usize);
+
+        let queries_raw = to_raw_ptr(queries);
+        let bucket_ids_raw = to_raw_ptr(&bucket_ids);
+        let self_raw = to_raw_ptr(self);
+
+        (0..n_queries)
+            .into_par_iter()
+            .map(|i| {
+                let queries: &Tensor = from_raw_ptr(queries_raw);
+                let bucket_ids: &Tensor = from_raw_ptr(bucket_ids_raw);
+                let slf: &RustLmi = from_raw_ptr(self_raw);
+
+                let query = queries.get(i);
+                let bucket_id = bucket_ids.get(i).int64_value(&[]);
+
+                let bucket_data = slf.bucket_data.get(&bucket_id).unwrap();
+                let bucket_data_ids = slf.bucket_data_ids.get(&bucket_id).unwrap();
+
+                let query_ptr: *const f32 = query.data_ptr() as *const f32;
+                let query_size = query.size()[0] as usize;
+                let query_slice = unsafe { std::slice::from_raw_parts(query_ptr, query_size) };
+
+                let bucket_data_ptr: *const f32 = bucket_data.data_ptr() as *const f32;
+                let num_vectors = bucket_data.size()[0] as usize;
+                let vector_dim = bucket_data.size()[1] as usize;
+
+                let bucket_slice = unsafe {
+                    std::slice::from_raw_parts(bucket_data_ptr, num_vectors * vector_dim)
+                };
+
+                let mut similarities = vec![(0.0, 0); num_vectors];
+
+                for i in 0..num_vectors {
+                    let start = i * vector_dim;
+                    let end = start + vector_dim;
+                    let bucket_vector = &bucket_slice[start..end];
+
+                    similarities[i] = (
+                        unsafe {
+                            dot_product_avx(
+                                query_slice.as_ptr(),
+                                bucket_vector.as_ptr(),
+                                vector_dim,
+                            )
+                        },
+                        i as i32,
+                    );
+                }
+
+                let pivot_index = num_vectors - k.min(num_vectors as i64) as usize;
+                similarities
+                    .select_nth_unstable_by(pivot_index, |a, b| a.0.partial_cmp(&b.0).unwrap());
+
+                let mut results = similarities[pivot_index..].to_vec();
+                results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+                let mut indices = results.iter().map(|(_, i)| *i).collect::<Vec<i32>>();
+
+                while indices.len() < k as usize {
+                    indices.push(0);
+                }
+
+                let indices = Tensor::from_slice(&indices);
+
+                bucket_data_ids.index(&[Some(indices)])
+            })
+            .collect::<Vec<Tensor>>()
+            .into_iter()
+            .enumerate()
+            .for_each(|(_, result)| {
+                all_results.push(result);
+            });
+
+        Tensor::stack(&all_results, 0)
     }
 
     pub fn predict(&self, X: &Tensor, top_k: i64) -> (Tensor, Tensor) {

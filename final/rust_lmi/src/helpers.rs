@@ -1,6 +1,7 @@
 use std::arch::x86_64::_mm256_loadu_ps;
 use std::arch::x86_64::*;
 
+
 #[allow(unused)]
 pub fn to_raw_ptr<T>(x: &T) -> usize {
     let x_ptr = x as *const T;
@@ -52,7 +53,6 @@ pub unsafe fn dot_product_avx(v1: *const f32, v2: *const f32, dim: usize) -> f32
     total
 }
 
-
 #[allow(unused)]
 pub fn k_largest<T: PartialOrd + Clone>(vec: &mut Vec<T>, k: usize) -> Vec<T> {
     let len = vec.len();
@@ -67,13 +67,14 @@ pub fn k_largest<T: PartialOrd + Clone>(vec: &mut Vec<T>, k: usize) -> Vec<T> {
     result
 }
 
-fn close_f32(a: f32, b: f32) -> bool {
-    (a - b).abs() < 1e-3
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tch::Tensor;
+
+    fn close_f32(a: f32, b: f32) -> bool {
+        (a - b).abs() < 1e-3
+    }
 
     #[test]
     fn test_dot_product() {
@@ -119,5 +120,33 @@ mod tests {
         let k = 3;
         let result = k_largest(&mut vec, k);
         assert_eq!(result, &[16.2, 9.8, 4.5]);
+    }
+
+    #[test]
+    fn test_k_largest_touple() {
+        let mut similarities = vec![
+            (8.0, 8),
+            (0.0, 0),
+            (1.0, 1),
+            (3.0, 3),
+            (5.0, 5),
+            (2.0, 2),
+            (4.0, 4),
+            (6.0, 6),
+            (7.0, 7),
+            (9.0, 9),
+        ];
+        let k = 3;
+        let num_vectors = similarities.len();
+
+        let pivot_index = num_vectors - k as usize;
+        similarities.select_nth_unstable_by(pivot_index, |a, b| a.0.partial_cmp(&b.0).unwrap());
+
+        let mut results = similarities[pivot_index..].to_vec();
+        results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+        let indices = results.iter().map(|(_, i)| *i).collect::<Vec<i32>>();
+        let indices = Tensor::from_slice(&indices);
+
+        assert_eq!(indices, Tensor::from_slice(&vec![9, 8, 7]));
     }
 }

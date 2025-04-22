@@ -45,6 +45,7 @@ lmi = LMI(model=model, n_buckets=n_buckets, data_dimensionality=d)
 lmi._run_kmeans = utils.measure_runtime(lmi._run_kmeans)
 lmi._train_model = utils.measure_runtime(lmi._train_model)
 lmi._create_buckets = utils.measure_runtime(lmi._create_buckets)
+lmi.search_raw_multiple = utils.measure_runtime(lmi.search_raw_multiple)
 
 logger.debug("Running tests...")
 lmi.run_tests()
@@ -53,7 +54,7 @@ logger.debug("Running kmeans...")
 y = lmi._run_kmeans(X_train)
 
 logger.debug("Training model...")
-lmi._train_model(X_train, y, 1, 0.001)
+lmi._train_model(X_train, y, 10, 0.001)
 
 logger.debug("Creating buckets...")
 lmi._create_buckets(X)
@@ -79,8 +80,8 @@ def search(queries, k):
 
 logger.debug("Searching...")
 k = 30
-nearest_neighbors = search(queries, k)
-# nearest_neighbors = lmi.search_multiple(queries, k)
+# nearest_neighbors = search(queries, k)
+nearest_neighbors = lmi.search_raw_multiple(queries, k).detach().cpu().numpy()
 
 identifier = f"lmi"
 utils.store_results(
