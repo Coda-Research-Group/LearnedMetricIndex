@@ -46,6 +46,7 @@ lmi._run_kmeans = utils.measure_runtime(lmi._run_kmeans)
 lmi._train_model = utils.measure_runtime(lmi._train_model)
 lmi._create_buckets = utils.measure_runtime(lmi._create_buckets)
 lmi.search_raw_multiple = utils.measure_runtime(lmi.search_raw_multiple)
+lmi.search_raw_multiple_nprobe = utils.measure_runtime(lmi.search_raw_multiple_nprobe)
 
 logger.debug("Running tests...")
 lmi.run_tests()
@@ -81,7 +82,8 @@ def search(queries, k):
 logger.debug("Searching...")
 k = 30
 # nearest_neighbors = search(queries, k)
-nearest_neighbors = lmi.search_raw_multiple(queries, k).detach().cpu().numpy()
+# nearest_neighbors = lmi.search_raw_multiple(queries, k).detach().cpu().numpy()
+nearest_neighbors = lmi.search_raw_multiple_nprobe(queries, k, 20).detach().cpu().numpy()
 
 identifier = f"lmi"
 utils.store_results(
