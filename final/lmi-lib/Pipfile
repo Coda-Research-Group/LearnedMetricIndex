@@ -3,8 +3,14 @@ url = "https://pypi.org/simple"
 verify_ssl = true
 name = "pypi"
 
+[[source]]
+url = "https://download.pytorch.org/whl/cpu"
+verify_ssl = true
+name = "pytorch-cpu"
+
 [packages]
-torch = "==2.5.1"
+torch = {version = "==2.5.1+cpu", index = "pytorch-cpu"}
+# torch = "==2.5.1"
 patchelf = "==0.17.2.2"
 numpy = "==2.2.4"
 h5py = "==3.13.0"
