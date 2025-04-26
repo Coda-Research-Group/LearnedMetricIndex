@@ -1,5 +1,7 @@
 #![allow(non_snake_case)]
 #![allow(unsafe_op_in_unsafe_fn)]
+#![feature(stdarch_x86_avx512)]       // Enables unstable AVX512 intrinsics
+#![feature(avx512_target_feature)] 
 
 use std::collections::HashMap;
 use tch::data::Iter2;
@@ -18,7 +20,7 @@ use serde_json;
 use rayon::prelude::*;
 
 pub mod helpers;
-use helpers::{dot_product_avx2, from_raw_ptr, to_raw_ptr};
+use helpers::{dot_product, from_raw_ptr, to_raw_ptr};
 
 const SEED: i64 = 42;
 
@@ -221,7 +223,7 @@ impl RustLmi {
 
                 *dist_item = (
                     unsafe {
-                        dot_product_avx2(query_slice.as_ptr(), bucket_vector.as_ptr(), vector_dim)
+                        dot_product(query_slice.as_ptr(), bucket_vector.as_ptr(), vector_dim)
                     },
                     i as i32,
                 );
@@ -283,7 +285,7 @@ impl RustLmi {
 
                     similarities[i] = (
                         unsafe {
-                            dot_product_avx2(
+                            dot_product(
                                 query_slice.as_ptr(),
                                 bucket_vector.as_ptr(),
                                 vector_dim,
@@ -385,7 +387,7 @@ impl RustLmi {
                             let bucket_vector = &bucket_slice[start..end];
 
                             let similarity = unsafe {
-                                dot_product_avx2(
+                                dot_product(
                                     query_slice.as_ptr(),
                                     bucket_vector.as_ptr(),
                                     vector_dim,

@@ -18,7 +18,7 @@ pub fn from_raw_ptr_mut<'a, T>(raw_ptr: usize) -> &'a mut T {
 }
 
 #[allow(unused)]
-pub unsafe fn dot_product(v1: *const f32, v2: *const f32, dim: usize) -> f32 {
+pub unsafe fn dot_product_scalar(v1: *const f32, v2: *const f32, dim: usize) -> f32 {
     let mut total = 0.0;
     for i in 0..dim {
         total += *v1.add(i) * *v2.add(i);
@@ -138,6 +138,41 @@ pub unsafe fn dot_product_avx2_fma_reg_sum(v1: *const f32, v2: *const f32, dim: 
 }
 
 #[allow(unused)]
+#[target_feature(enable = "avx512f")]
+pub unsafe fn dot_product_avx512(v1: *const f32, v2: *const f32, dim: usize) -> f32 {
+    let mut sum_vec = _mm512_setzero_ps();
+    let mut i = 0;
+    let step = 16;
+
+    while i + step <= dim {
+        let v1_chunk = _mm512_loadu_ps(v1.add(i));
+        let v2_chunk = _mm512_loadu_ps(v2.add(i));
+
+        let prod = _mm512_mul_ps(v1_chunk, v2_chunk);
+        sum_vec = _mm512_add_ps(sum_vec, prod);
+        i += step;
+    }
+
+    let mut total = _mm512_reduce_add_ps(sum_vec);
+
+    while i < dim {
+        total += *v1.add(i) * *v2.add(i);
+        i += 1;
+    }
+    total
+}
+
+pub unsafe fn dot_product(v1_ptr: *const f32, v2_ptr: *const f32, dim: usize) -> f32 {
+    if is_x86_feature_detected!("avx512f") {
+        dot_product_avx512(v1_ptr, v2_ptr, dim)
+    } else if is_x86_feature_detected!("avx2") {
+        dot_product_avx2(v1_ptr, v2_ptr, dim)
+    } else {
+        dot_product_scalar(v1_ptr, v2_ptr, dim)
+    }
+}
+
+#[allow(unused)]
 pub fn k_largest<T: PartialOrd + Clone>(vec: &mut Vec<T>, k: usize) -> Vec<T> {
     let len = vec.len();
     if k == 0 || k > len {
@@ -166,7 +201,7 @@ mod tests {
             let v1 = vec![1.0, 2.0, 3.0];
             let v2 = vec![4.0, 5.0, 6.0];
             let dim = v1.len();
-            let result = dot_product(v1.as_ptr(), v2.as_ptr(), dim);
+            let result = dot_product_scalar(v1.as_ptr(), v2.as_ptr(), dim);
             assert!(close_f32(result, 32.0));
         }
     }
@@ -192,7 +227,7 @@ mod tests {
             let v1: Vec<f32> = (0..n).map(|_| rng.r#gen()).collect();
             let v2: Vec<f32> = (0..n).map(|_| rng.r#gen()).collect();
 
-            let result_scalar = dot_product(v1.as_ptr(), v2.as_ptr(), n);
+            let result_scalar = dot_product_scalar(v1.as_ptr(), v2.as_ptr(), n);
             let result_avx = dot_product_avx2(v1.as_ptr(), v2.as_ptr(), n);
             assert!(close_f32(result_scalar, result_avx));
         }
@@ -219,7 +254,7 @@ mod tests {
             let v1: Vec<f32> = (0..n).map(|_| rng.r#gen()).collect();
             let v2: Vec<f32> = (0..n).map(|_| rng.r#gen()).collect();
 
-            let result_scalar = dot_product(v1.as_ptr(), v2.as_ptr(), n);
+            let result_scalar = dot_product_scalar(v1.as_ptr(), v2.as_ptr(), n);
             let result_avx = dot_product_avx2(v1.as_ptr(), v2.as_ptr(), n);
             let result_avx_fma = dot_product_avx2_fma(v1.as_ptr(), v2.as_ptr(), n);
 
@@ -249,7 +284,7 @@ mod tests {
             let v1: Vec<f32> = (0..n).map(|_| rng.r#gen()).collect();
             let v2: Vec<f32> = (0..n).map(|_| rng.r#gen()).collect();
 
-            let result_scalar = dot_product(v1.as_ptr(), v2.as_ptr(), n);
+            let result_scalar = dot_product_scalar(v1.as_ptr(), v2.as_ptr(), n);
             let result_avx = dot_product_avx2(v1.as_ptr(), v2.as_ptr(), n);
             let result_avx_reg_sum = dot_product_avx2_reg_sum(v1.as_ptr(), v2.as_ptr(), n);
 
@@ -279,7 +314,7 @@ mod tests {
             let v1: Vec<f32> = (0..n).map(|_| rng.r#gen()).collect();
             let v2: Vec<f32> = (0..n).map(|_| rng.r#gen()).collect();
 
-            let result_scalar = dot_product(v1.as_ptr(), v2.as_ptr(), n);
+            let result_scalar = dot_product_scalar(v1.as_ptr(), v2.as_ptr(), n);
             let result_avx = dot_product_avx2(v1.as_ptr(), v2.as_ptr(), n);
             let result_avx_optimized = dot_product_avx2_fma_reg_sum(v1.as_ptr(), v2.as_ptr(), n);
 
