@@ -5,8 +5,10 @@ from pathlib import Path
 import time
 from tqdm import tqdm
 from loguru import logger
-
+from torch.nn import Sequential, Linear, ReLU
 from lmi import LMI
+
+from math import sqrt
 
 logger.debug(f"Torch version: {torch.__version__}")
 
@@ -28,14 +30,20 @@ X_train = utils.sample_train_subset(
     dataset, n_data, data_dim, sample_size, chunk_size
 ).to(torch.float32)
 
-n_buckets = 320
+n_buckets = int(sqrt(n_data))
 
-model = torch.nn.Sequential(
-    torch.nn.Linear(d, 512),
-    torch.nn.ReLU(),
-    torch.nn.Linear(512, 384),
-    torch.nn.ReLU(),
-    torch.nn.Linear(384, n_buckets),
+# model = torch.nn.Sequential(
+#     torch.nn.Linear(d, 512),
+#     torch.nn.ReLU(),
+#     torch.nn.Linear(512, 384),
+#     torch.nn.ReLU(),
+#     torch.nn.Linear(384, n_buckets),
+# )
+
+model = Sequential(
+    Linear(data_dim, 512),
+    ReLU(),
+    Linear(512, n_buckets),
 )
 
 # Create an instance of the LMI
@@ -55,7 +63,7 @@ logger.debug("Running kmeans...")
 y = lmi._run_kmeans(X_train)
 
 logger.debug("Training model...")
-lmi._train_model(X_train, y, 10, 0.001)
+lmi._train_model(X_train, y, epochs=15, lr=0.001)
 
 logger.debug("Creating buckets...")
 lmi._create_buckets(X)
@@ -63,39 +71,48 @@ lmi._create_buckets(X)
 # logger.debug("Building model...")
 # lmi.build(X, 15, 0.001)
 
-now = time.time()
-
-logger.debug("Loading queries...")
-queries = utils.load_queries()
 
 @utils.measure_runtime
 def search(queries, k):
     nearest_neighbors = np.zeros((len(queries), k))
     # nearest_neighbors = lmi.search_multiple(queries, k)
     for i, query in enumerate(tqdm(queries)):
-        result = (
-                lmi.search_raw(query.unsqueeze(0), k).detach().cpu().numpy()
-            )
-        nearest_neighbors[i][:len(result)] = result # If lmi returns less than k results, the rest is left as 0
+        result = lmi.search_raw(query.unsqueeze(0), k).detach().cpu().numpy()
+        nearest_neighbors[i][
+            : len(result)
+        ] = result  # If lmi returns less than k results, the rest is left as 0
     return nearest_neighbors
 
-logger.debug("Searching...")
-k = 30
-# nearest_neighbors = search(queries, k)
-# nearest_neighbors = lmi.search_raw_multiple(queries, k).detach().cpu().numpy()
-nearest_neighbors = lmi.search_raw_multiple_nprobe(queries, k, 20).detach().cpu().numpy()
+logger.debug("Loading queries...")
+queries = utils.load_queries()
 
-identifier = f"lmi"
-utils.store_results(
-    Path("result/") / "task1" / "300K" / f"{identifier}.h5",
-    "lmi",
-    np.zeros((len(queries), k)),
-    nearest_neighbors + 1,
-    0,
-    0,
-    0,
-    0,
-    0,
-    identifier,
-    "300K",
-)
+# nprobes = [1, 2, 5, 10, 20]
+nprobes = [5]
+
+for nprobe in nprobes:
+    now = time.time()
+
+    logger.debug("Searching...")
+    k = 30
+    # nearest_neighbors = search(queries, k)
+    # nearest_neighbors = lmi.search_raw_multiple(queries, k).detach().cpu().numpy()
+    nearest_neighbors = (
+        lmi.search_raw_multiple_nprobe(queries, k, nprobe).detach().cpu().numpy()
+    )
+
+    querytime = time.time() - now
+
+    identifier = f"lmi-nprobe={nprobe}"
+    utils.store_results(
+        Path("result/") / "task1" / "300K" / f"{identifier}.h5",
+        "lmi",
+        np.zeros((len(queries), k)),
+        nearest_neighbors + 1,
+        0,
+        0,
+        0,
+        0,
+        querytime,
+        identifier,
+        "300K",
+    )
