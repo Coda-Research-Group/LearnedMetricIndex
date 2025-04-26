@@ -1,7 +1,10 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 
 use rand::Rng;
-use rust_lmi::helpers::{dot_product, dot_product_avx};
+use rust_lmi::helpers::{
+    dot_product, dot_product_avx2, dot_product_avx2_fma, dot_product_avx2_fma_reg_sum,
+    dot_product_avx2_reg_sum
+};
 
 fn bench_dot_product(c: &mut Criterion) {
     let mut rng = rand::thread_rng();
@@ -16,7 +19,19 @@ fn bench_dot_product(c: &mut Criterion) {
         });
 
         c.bench_function("dot_product_avx", |b| {
-            b.iter(|| black_box(dot_product_avx(v1.as_ptr(), v2.as_ptr(), n)));
+            b.iter(|| black_box(dot_product_avx2(v1.as_ptr(), v2.as_ptr(), n)));
+        });
+
+        c.bench_function("dot_product_avx_fma", |b| {
+            b.iter(|| black_box(dot_product_avx2_fma(v1.as_ptr(), v2.as_ptr(), n)));
+        });
+
+        c.bench_function("dot_product_avx_reg_sum", |b| {
+            b.iter(|| black_box(dot_product_avx2_reg_sum(v1.as_ptr(), v2.as_ptr(), n)));
+        });
+
+        c.bench_function("dot_product_avx_fma_reg_sum", |b| {
+            b.iter(|| black_box(dot_product_avx2_fma_reg_sum(v1.as_ptr(), v2.as_ptr(), n)));
         });
     }
 }

@@ -18,7 +18,7 @@ use serde_json;
 use rayon::prelude::*;
 
 pub mod helpers;
-use helpers::{dot_product_avx, from_raw_ptr, to_raw_ptr};
+use helpers::{dot_product_avx2, from_raw_ptr, to_raw_ptr};
 
 const SEED: i64 = 42;
 
@@ -221,7 +221,7 @@ impl RustLmi {
 
                 *dist_item = (
                     unsafe {
-                        dot_product_avx(query_slice.as_ptr(), bucket_vector.as_ptr(), vector_dim)
+                        dot_product_avx2(query_slice.as_ptr(), bucket_vector.as_ptr(), vector_dim)
                     },
                     i as i32,
                 );
@@ -283,7 +283,7 @@ impl RustLmi {
 
                     similarities[i] = (
                         unsafe {
-                            dot_product_avx(
+                            dot_product_avx2(
                                 query_slice.as_ptr(),
                                 bucket_vector.as_ptr(),
                                 vector_dim,
@@ -385,7 +385,7 @@ impl RustLmi {
                             let bucket_vector = &bucket_slice[start..end];
 
                             let similarity = unsafe {
-                                dot_product_avx(
+                                dot_product_avx2(
                                     query_slice.as_ptr(),
                                     bucket_vector.as_ptr(),
                                     vector_dim,

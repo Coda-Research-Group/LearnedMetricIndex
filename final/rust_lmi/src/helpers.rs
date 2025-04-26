@@ -1,7 +1,6 @@
 use std::arch::x86_64::_mm256_loadu_ps;
 use std::arch::x86_64::*;
 
-
 #[allow(unused)]
 pub fn to_raw_ptr<T>(x: &T) -> usize {
     let x_ptr = x as *const T;
@@ -29,7 +28,7 @@ pub unsafe fn dot_product(v1: *const f32, v2: *const f32, dim: usize) -> f32 {
 
 #[allow(unused)]
 #[target_feature(enable = "avx2")]
-pub unsafe fn dot_product_avx(v1: *const f32, v2: *const f32, dim: usize) -> f32 {
+pub unsafe fn dot_product_avx2(v1: *const f32, v2: *const f32, dim: usize) -> f32 {
     let mut sum_vec = _mm256_setzero_ps();
     let mut i = 0;
 
@@ -45,11 +44,96 @@ pub unsafe fn dot_product_avx(v1: *const f32, v2: *const f32, dim: usize) -> f32
     _mm256_storeu_ps(sum_array.as_mut_ptr(), sum_vec);
     let mut total = sum_array.iter().sum();
 
-    // Handle remainder
     while i < dim {
         total += *v1.add(i) * *v2.add(i);
         i += 1;
     }
+    total
+}
+
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn dot_product_avx2_fma(v1: *const f32, v2: *const f32, dim: usize) -> f32 {
+    let mut sum_vec = _mm256_setzero_ps();
+    let mut i = 0;
+
+    while i + 8 <= dim {
+        let q_chunk = _mm256_loadu_ps(v1.add(i));
+        let d_chunk = _mm256_loadu_ps(v2.add(i));
+        sum_vec = _mm256_fmadd_ps(q_chunk, d_chunk, sum_vec);
+        i += 8;
+    }
+
+    let mut sum_array = [0f32; 8];
+    _mm256_storeu_ps(sum_array.as_mut_ptr(), sum_vec);
+    let mut total = sum_array.iter().sum();
+
+    while i < dim {
+        total += *v1.add(i) * *v2.add(i);
+        i += 1;
+    }
+    total
+}
+
+#[target_feature(enable = "avx2")]
+pub unsafe fn dot_product_avx2_reg_sum(v1: *const f32, v2: *const f32, dim: usize) -> f32 {
+    let mut sum_vec = _mm256_setzero_ps();
+
+    let mut i = 0;
+    let end = dim - (dim % 8);
+
+    while i < end {
+        let v1_chunk = _mm256_loadu_ps(v1.add(i));
+        let v2_chunk = _mm256_loadu_ps(v2.add(i));
+        let prod = _mm256_mul_ps(v1_chunk, v2_chunk);
+        sum_vec = _mm256_add_ps(sum_vec, prod);
+        i += 8;
+    }
+
+    let upper_128 = _mm256_extractf128_ps(sum_vec, 1);
+    let lower_128 = _mm256_castps256_ps128(sum_vec);
+    let sum_128 = _mm_add_ps(lower_128, upper_128);
+
+    let sum_hadd1 = _mm_hadd_ps(sum_128, sum_128);
+    let sum_hadd2 = _mm_hadd_ps(sum_hadd1, sum_hadd1);
+
+    let mut total = _mm_cvtss_f32(sum_hadd2);
+
+    while i < dim {
+        total += *v1.add(i) * *v2.add(i);
+        i += 1;
+    }
+
+    total
+}
+
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn dot_product_avx2_fma_reg_sum(v1: *const f32, v2: *const f32, dim: usize) -> f32 {
+    let mut sum_vec = _mm256_setzero_ps();
+
+    let mut i = 0;
+    let end = dim - (dim % 8);
+
+    while i < end {
+        let v1_chunk = _mm256_loadu_ps(v1.add(i));
+        let v2_chunk = _mm256_loadu_ps(v2.add(i));
+        sum_vec = _mm256_fmadd_ps(v1_chunk, v2_chunk, sum_vec);
+        i += 8;
+    }
+
+    let upper_128 = _mm256_extractf128_ps(sum_vec, 1);
+    let lower_128 = _mm256_castps256_ps128(sum_vec);
+    let sum_128 = _mm_add_ps(lower_128, upper_128);
+
+    let sum_hadd1 = _mm_hadd_ps(sum_128, sum_128);
+    let sum_hadd2 = _mm_hadd_ps(sum_hadd1, sum_hadd1);
+
+    let mut total = _mm_cvtss_f32(sum_hadd2);
+
+    while i < dim {
+        total += *v1.add(i) * *v2.add(i);
+        i += 1;
+    }
+
     total
 }
 
@@ -93,7 +177,7 @@ mod tests {
             let v1 = vec![1.0, 2.0, 3.0];
             let v2 = vec![4.0, 5.0, 6.0];
             let dim = v1.len();
-            let result = dot_product_avx(v1.as_ptr(), v2.as_ptr(), dim);
+            let result = dot_product_avx2(v1.as_ptr(), v2.as_ptr(), dim);
             assert!(close_f32(result, 32.0));
         }
     }
@@ -109,8 +193,98 @@ mod tests {
             let v2: Vec<f32> = (0..n).map(|_| rng.r#gen()).collect();
 
             let result_scalar = dot_product(v1.as_ptr(), v2.as_ptr(), n);
-            let result_avx = dot_product_avx(v1.as_ptr(), v2.as_ptr(), n);
+            let result_avx = dot_product_avx2(v1.as_ptr(), v2.as_ptr(), n);
             assert!(close_f32(result_scalar, result_avx));
+        }
+    }
+
+    #[test]
+    fn test_dot_product_avx_fma() {
+        unsafe {
+            let v1 = vec![1.0, 2.0, 3.0];
+            let v2 = vec![4.0, 5.0, 6.0];
+            let dim = v1.len();
+            let result = dot_product_avx2_fma(v1.as_ptr(), v2.as_ptr(), dim);
+            assert!(close_f32(result, 32.0));
+        }
+    }
+
+    #[test]
+    fn test_compare_dot_products_fma() {
+        unsafe {
+            use rand::Rng;
+
+            let n = 1000;
+            let mut rng = rand::thread_rng();
+            let v1: Vec<f32> = (0..n).map(|_| rng.r#gen()).collect();
+            let v2: Vec<f32> = (0..n).map(|_| rng.r#gen()).collect();
+
+            let result_scalar = dot_product(v1.as_ptr(), v2.as_ptr(), n);
+            let result_avx = dot_product_avx2(v1.as_ptr(), v2.as_ptr(), n);
+            let result_avx_fma = dot_product_avx2_fma(v1.as_ptr(), v2.as_ptr(), n);
+
+            assert!(close_f32(result_scalar, result_avx_fma));
+            assert!(close_f32(result_avx, result_avx_fma));
+        }
+    }
+
+    #[test]
+    fn test_dot_product_avx_reg_sum() {
+        unsafe {
+            let v1 = vec![1.0, 2.0, 3.0];
+            let v2 = vec![4.0, 5.0, 6.0];
+            let dim = v1.len();
+            let result = dot_product_avx2_reg_sum(v1.as_ptr(), v2.as_ptr(), dim);
+            assert!(close_f32(result, 32.0));
+        }
+    }
+
+    #[test]
+    fn test_compare_dot_products_reg_sum() {
+        unsafe {
+            use rand::Rng;
+
+            let n = 1000;
+            let mut rng = rand::thread_rng();
+            let v1: Vec<f32> = (0..n).map(|_| rng.r#gen()).collect();
+            let v2: Vec<f32> = (0..n).map(|_| rng.r#gen()).collect();
+
+            let result_scalar = dot_product(v1.as_ptr(), v2.as_ptr(), n);
+            let result_avx = dot_product_avx2(v1.as_ptr(), v2.as_ptr(), n);
+            let result_avx_reg_sum = dot_product_avx2_reg_sum(v1.as_ptr(), v2.as_ptr(), n);
+
+            assert!(close_f32(result_scalar, result_avx_reg_sum));
+            assert!(close_f32(result_avx, result_avx_reg_sum));
+        }
+    }
+
+    #[test]
+    fn test_dot_product_avx_fma_reg_sum() {
+        unsafe {
+            let v1 = vec![1.0, 2.0, 3.0];
+            let v2 = vec![4.0, 5.0, 6.0];
+            let dim = v1.len();
+            let result = dot_product_avx2_fma_reg_sum(v1.as_ptr(), v2.as_ptr(), dim);
+            assert!(close_f32(result, 32.0));
+        }
+    }
+
+    #[test]
+    fn test_compare_dot_products_fma_reg_sum() {
+        unsafe {
+            use rand::Rng;
+
+            let n = 1000;
+            let mut rng = rand::thread_rng();
+            let v1: Vec<f32> = (0..n).map(|_| rng.r#gen()).collect();
+            let v2: Vec<f32> = (0..n).map(|_| rng.r#gen()).collect();
+
+            let result_scalar = dot_product(v1.as_ptr(), v2.as_ptr(), n);
+            let result_avx = dot_product_avx2(v1.as_ptr(), v2.as_ptr(), n);
+            let result_avx_optimized = dot_product_avx2_fma_reg_sum(v1.as_ptr(), v2.as_ptr(), n);
+
+            assert!(close_f32(result_scalar, result_avx_optimized));
+            assert!(close_f32(result_avx, result_avx_optimized));
         }
     }
 
