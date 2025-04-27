@@ -77,15 +77,15 @@ impl RustLmi {
         }
     }
 
-    pub fn run_kmeans(&self, X: &Tensor) -> Tensor {
-        assert_eq!(self.dimensionality, X.size()[1]);
+    pub fn run_kmeans(n_buckets: i64, dimensionality: i64, X: &Tensor) -> Tensor {
+        assert_eq!(dimensionality, X.size()[1]);
 
         let v = Vec::<f32>::try_from(X.reshape([X.numel() as i64])).unwrap();
         let kmeans: KMeans<_, 8, _> = KMeans::new(
             v,
             X.size()[0] as usize,
-            self.dimensionality as usize,
-            EuclideanDistance,
+            dimensionality as usize,
+            EuclideanDistance
         );
         let rnd = rand::rngs::SmallRng::seed_from_u64(SEED as u64);
 
@@ -106,7 +106,7 @@ impl RustLmi {
 
         let kmeans = kmeans.kmeans_minibatch(
             4096,
-            self.n_buckets as usize,
+            n_buckets as usize,
             100,
             KMeans::init_random_sample,
             &conf,

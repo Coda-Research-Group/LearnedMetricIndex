@@ -1,4 +1,8 @@
 import torch
+from typing import Optional
+from torch.nn import Sequential
+from pathlib import Path
+
 
 class LMI:
     """
@@ -65,4 +69,18 @@ class LMI:
     def search_multiple(self, queries: torch.Tensor, k: int) -> torch.Tensor: ...
     def search_raw(self, query: torch.Tensor, k: int) -> torch.Tensor: ...
     def search_raw_multiple(self, queries: torch.Tensor, k: int) -> torch.Tensor: ...
-    def search_raw_multiple_nprobe(self, queries: torch.Tensor, k: int, nprobe: int) -> torch.Tensor: ...
+    def search_raw_multiple_nprobe(
+        self, queries: torch.Tensor, k: int, nprobe: int
+    ) -> torch.Tensor: ...
+    @staticmethod
+    def create(
+        dataset: Path,
+        epochs: int,
+        lr: float,
+        sample_size: int,
+        n_buckets: int,
+        chunk_size: int,
+        model: Optional[Sequential] = None,
+        reduced_dim: Optional[int] = None,
+        SEED: int = 42,
+    ) -> LMI: ...
