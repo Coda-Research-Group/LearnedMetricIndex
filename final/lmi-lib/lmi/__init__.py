@@ -41,10 +41,18 @@ class LMI:
         return self._inner._create_buckets(X)
 
     @utils.measure_runtime
+    def _create_buckets_scalable(self, dataset: Path, n_data: int, chunk_size: int):
+        return self._inner._create_buckets_scalable(dataset, n_data, chunk_size)
+
+    @utils.measure_runtime
     def search_raw_multiple_nprobe(
         self, queries: torch.Tensor, k: int, nprobe: int
     ) -> torch.Tensor:
         return self._inner.search_raw_multiple_nprobe(queries, k, nprobe)
+
+    @staticmethod
+    def init_logging():
+        LMIBase.init_logging()
 
     @staticmethod
     def create(

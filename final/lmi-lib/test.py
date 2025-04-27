@@ -22,6 +22,7 @@ chunk_size = 100000
 d = 768
 n_buckets = int(sqrt(300000))
 
+LMI.init_logging()
 lmi = LMI.create(dataset, 15, 0.001, sample_size, n_buckets, chunk_size, reduced_dim=128)
 
 

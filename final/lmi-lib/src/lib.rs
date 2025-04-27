@@ -10,6 +10,12 @@ use pyo3_tch::PyTensor;
 use rust_lmi::RustLmi;
 use rust_lmi::helpers::{from_raw_ptr, to_raw_ptr};
 
+use std::fmt::Write;
+use time::macros::format_description;
+use tracing::Level;
+use tracing_subscriber::FmtSubscriber;
+use tracing_subscriber::fmt::{format, time::LocalTime};
+
 #[allow(clippy::upper_case_acronyms)]
 #[pyclass]
 struct LMI {
@@ -31,6 +37,23 @@ impl LMI {
             dimensionality: data_dimensionality,
             rust_object: RustLmi::new(model_json, n_buckets, data_dimensionality),
         }
+    }
+
+    #[staticmethod]
+    pub fn init_logging() {
+        let time_format = LocalTime::new(format_description!(
+            "[year]-[month]-[day] [hour]:[minute]:[second].[subsecond digits:3]"
+        ));
+
+        let subscriber = FmtSubscriber::builder()
+            .with_max_level(Level::DEBUG)
+            .with_timer(time_format)
+            .with_level(true)
+            .with_target(false)
+            .with_file(true)
+            .with_line_number(true)
+            .with_ansi(false)
+            .init();
     }
 
     #[staticmethod]
@@ -77,10 +100,6 @@ impl LMI {
 
     fn get_bucket(&self, bucket_id: i64) -> PyTensor {
         PyTensor(self.rust_object.bucket_data[&bucket_id].shallow_clone())
-    }
-
-    fn print_bucket_info(&self) {
-        println!("Bucket data: {:?}", self.rust_object.bucket_data);
     }
 
     fn search(&self, query: PyTensor, k: i64) -> PyTensor {

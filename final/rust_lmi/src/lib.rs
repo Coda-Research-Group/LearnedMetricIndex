@@ -29,6 +29,7 @@ use ndarray::Array2;
 use ndarray::s;
 use std::io::Write;
 use std::path::Path;
+use tracing::{info, error};
 
 const SEED: i64 = 42;
 
@@ -77,7 +78,7 @@ fn load_chunk_hdf5(dataset_path: &Path, start: usize, stop: usize, dim: i64) -> 
     let data_ndarray: Array2<f16> = dataset
         .read_slice::<f16, _, _>(s![start..actual_stop, ..])
         .context("Failed to read slice from HDF5 dataset")?;
-    let data_vec: Vec<f16> = data_ndarray.into_raw_vec();
+    let data_vec: Vec<f16> = data_ndarray.into_raw_vec_and_offset().0;
 
     let tensor = Tensor::from_slice(&data_vec)
         .reshape(&[n_rows as i64, actual_dim])
@@ -127,7 +128,7 @@ impl RustLmi {
         let conf: KMeansConfig<f32> = KMeansConfig::build()
             .iteration_done(&|s, nr, new_distsum| {
                 if nr % 10 == 0 {
-                    println!(
+                    info!(
                         "Iteration {} - Error: {:.2} -> {:.2} | Improvement: {:.2}",
                         nr,
                         s.distsum,
@@ -170,7 +171,7 @@ impl RustLmi {
                 optimizer.backward_step(&loss);
             }
 
-            println!(
+            info!(
                 "Epoch {} | Loss {:.5}",
                 epoch,
                 self.model
@@ -214,7 +215,7 @@ impl RustLmi {
         let device = self.vs.device();
 
         // --- Pass 1: Count items per bucket ---
-        println!("Pass 1: Counting items per bucket (Serial)...");
+        info!("Pass 1: Counting items per bucket (Serial)...");
         let mut total_counts = HashMap::<i64, usize>::new();
 
         for chunk_i in 0..n_chunks {
@@ -224,7 +225,7 @@ impl RustLmi {
                 continue;
             }
 
-            print!("\rPass 1: Processing chunk {}/{}", chunk_i + 1, n_chunks);
+            info!("Pass 1: Processing chunk {}/{}", chunk_i + 1, n_chunks);
             Write::flush(&mut std::io::stdout()).context("Failed to flush stdout")?;
 
             let chunk_data_f16 =
@@ -247,10 +248,10 @@ impl RustLmi {
             drop(chunk_data_f16);
             drop(chunk_data_f32);
         }
-        println!("\nPass 1: Counting complete.");
+        info!("\nPass 1: Counting complete.");
 
         // --- Bucket Initialization ---
-        println!("Initializing Bucket Storage (f16)...");
+        info!("Initializing Bucket Storage (f16)...");
         self.bucket_data.clear();
         self.bucket_data_ids.clear();
         let mut current_write_idx = HashMap::<i64, usize>::new();
@@ -277,7 +278,7 @@ impl RustLmi {
         }
 
         // --- Pass 2: Place data into buckets ---
-        println!("Pass 2: Placing data into buckets (Serial)...");
+        info!("Pass 2: Placing data into buckets (Serial)...");
         for chunk_i in 0..n_chunks {
             let start = chunk_i * chunk_size;
             let stop = std::cmp::min((chunk_i + 1) * chunk_size, n_data);
@@ -285,7 +286,7 @@ impl RustLmi {
                 continue;
             }
 
-            print!("\rPass 2: Processing chunk {}/{}", chunk_i + 1, n_chunks);
+            info!("Pass 2: Processing chunk {}/{}", chunk_i + 1, n_chunks);
             Write::flush(&mut std::io::stdout()).context("Failed to flush stdout")?;
 
             let chunk_data_f16 =
@@ -318,7 +319,7 @@ impl RustLmi {
                             .i((dest_row as i64, ..))
                             .copy_(&vector_f16);
                     } else {
-                        eprintln!(
+                        error!(
                             "\nWarning: Write index {} out of bounds for bucket {} data (size {})",
                             dest_row,
                             label,
@@ -330,7 +331,7 @@ impl RustLmi {
                     if dest_row < target_ids_tensor.size()[0] as usize {
                         target_ids_tensor.i(dest_row as i64).copy_(&original_index);
                     } else {
-                        eprintln!(
+                        error!(
                             "\nWarning: Write index {} out of bounds for bucket {} ids (size {})",
                             dest_row,
                             label,
@@ -347,7 +348,7 @@ impl RustLmi {
             drop(chunk_original_indices);
         }
 
-        println!("\nSerial bucket creation finished (f16).");
+        info!("\nSerial bucket creation finished (f16).");
         Ok(())
     }
 

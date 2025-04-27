@@ -12,4 +12,6 @@ tch = "0.18.1"
 pyo3 = { version = "0.21.2", features = ["extension-module"] }
 pyo3-tch = "0.18.1"
 rust-lmi = { path = "../rust_lmi" }
-
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.18", features = ["fmt", "time", "local-time"] }
+time = { version = "0.3.41", features = ["macros", "local-offset"] }
