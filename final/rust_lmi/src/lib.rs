@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 #![allow(unsafe_op_in_unsafe_fn)]
-#![feature(stdarch_x86_avx512)]       // Enables unstable AVX512 intrinsics
-#![feature(avx512_target_feature)] 
+#![feature(stdarch_x86_avx512)]
+#![feature(avx512_target_feature)]
 
 use std::collections::HashMap;
 use tch::data::Iter2;
@@ -21,6 +21,14 @@ use rayon::prelude::*;
 
 pub mod helpers;
 use helpers::{dot_product, from_raw_ptr, to_raw_ptr};
+
+use anyhow::{Context, Result};
+use half::f16;
+use hdf5::File;
+use ndarray::Array2;
+use ndarray::s;
+use std::io::Write;
+use std::path::Path;
 
 const SEED: i64 = 42;
 
@@ -51,13 +59,40 @@ fn create_model_from_json(model_json: &str, path: &nn::Path) -> Sequential {
     seq
 }
 
+fn load_chunk_hdf5(dataset_path: &Path, start: usize, stop: usize, dim: i64) -> Result<Tensor> {
+    let file = File::open(dataset_path).context("Failed to open HDF5 file")?;
+    let dataset = file
+        .dataset("emb")
+        .context("Failed to open 'emb' dataset")?;
+    let hdf5_shape = dataset.shape();
+    let actual_dim = hdf5_shape.get(1).cloned().unwrap_or(dim as usize) as i64;
+
+    let actual_stop = std::cmp::min(stop, hdf5_shape[0]);
+    let n_rows = actual_stop.saturating_sub(start);
+
+    if n_rows == 0 {
+        return Ok(Tensor::empty(&[0, actual_dim], (Kind::Half, Device::Cpu)));
+    }
+
+    let data_ndarray: Array2<f16> = dataset
+        .read_slice::<f16, _, _>(s![start..actual_stop, ..])
+        .context("Failed to read slice from HDF5 dataset")?;
+    let data_vec: Vec<f16> = data_ndarray.into_raw_vec();
+
+    let tensor = Tensor::from_slice(&data_vec)
+        .reshape(&[n_rows as i64, actual_dim])
+        .to_kind(Kind::Half);
+
+    Ok(tensor)
+}
+
 pub struct RustLmi {
-    n_buckets: i64,
-    dimensionality: i64,
-    bucket_data: HashMap<i64, Tensor>,
-    bucket_data_ids: HashMap<i64, Tensor>,
-    model: Sequential,
-    vs: nn::VarStore,
+    pub n_buckets: i64,
+    pub dimensionality: i64,
+    pub bucket_data: HashMap<i64, Tensor>,
+    pub bucket_data_ids: HashMap<i64, Tensor>,
+    pub model: Sequential,
+    pub vs: nn::VarStore,
 }
 
 impl RustLmi {
@@ -85,7 +120,7 @@ impl RustLmi {
             v,
             X.size()[0] as usize,
             dimensionality as usize,
-            EuclideanDistance
+            EuclideanDistance,
         );
         let rnd = rand::rngs::SmallRng::seed_from_u64(SEED as u64);
 
@@ -166,6 +201,154 @@ impl RustLmi {
                     .reshape([-1]),
             );
         }
+    }
+
+    pub fn create_buckets_scalable(
+        &mut self,
+        dataset_path_str: &str,
+        n_data: usize,
+        chunk_size: usize,
+    ) -> Result<()> {
+        let dataset_path = Path::new(dataset_path_str);
+        let n_chunks = (n_data + chunk_size - 1) / chunk_size;
+        let device = self.vs.device();
+
+        // --- Pass 1: Count items per bucket ---
+        println!("Pass 1: Counting items per bucket (Serial)...");
+        let mut total_counts = HashMap::<i64, usize>::new();
+
+        for chunk_i in 0..n_chunks {
+            let start = chunk_i * chunk_size;
+            let stop = std::cmp::min((chunk_i + 1) * chunk_size, n_data);
+            if start >= stop {
+                continue;
+            }
+
+            print!("\rPass 1: Processing chunk {}/{}", chunk_i + 1, n_chunks);
+            Write::flush(&mut std::io::stdout()).context("Failed to flush stdout")?;
+
+            let chunk_data_f16 =
+                load_chunk_hdf5(dataset_path, start, stop, self.dimensionality)?.to(device);
+            if chunk_data_f16.size()[0] == 0 {
+                continue;
+            }
+            let chunk_data_f32 = chunk_data_f16.to_kind(Kind::Float);
+
+            let chunk_labels = no_grad(|| self.predict(&chunk_data_f32, 1).1.reshape([-1]));
+
+            let labels_vec: Vec<i64> = chunk_labels
+                .try_into()
+                .context("Pass 1: Failed to convert labels tensor to Vec<i64>")?;
+
+            for label in labels_vec {
+                *total_counts.entry(label).or_insert(0) += 1;
+            }
+
+            drop(chunk_data_f16);
+            drop(chunk_data_f32);
+        }
+        println!("\nPass 1: Counting complete.");
+
+        // --- Bucket Initialization ---
+        println!("Initializing Bucket Storage (f16)...");
+        self.bucket_data.clear();
+        self.bucket_data_ids.clear();
+        let mut current_write_idx = HashMap::<i64, usize>::new();
+
+        for bucket_id in 0..self.n_buckets {
+            let total_size = *total_counts.get(&bucket_id).unwrap_or(&0);
+            if total_size > 0 {
+                let data_tensor = Tensor::empty(
+                    &[total_size as i64, self.dimensionality],
+                    (Kind::Half, device),
+                );
+                let ids_tensor = Tensor::empty(&[total_size as i64], (Kind::Int64, device));
+                self.bucket_data.insert(bucket_id, data_tensor);
+                self.bucket_data_ids.insert(bucket_id, ids_tensor);
+            } else {
+                self.bucket_data.insert(
+                    bucket_id,
+                    Tensor::empty(&[0, self.dimensionality], (Kind::Half, device)),
+                );
+                self.bucket_data_ids
+                    .insert(bucket_id, Tensor::empty(&[0], (Kind::Int64, device)));
+            }
+            current_write_idx.insert(bucket_id, 0);
+        }
+
+        // --- Pass 2: Place data into buckets ---
+        println!("Pass 2: Placing data into buckets (Serial)...");
+        for chunk_i in 0..n_chunks {
+            let start = chunk_i * chunk_size;
+            let stop = std::cmp::min((chunk_i + 1) * chunk_size, n_data);
+            if start >= stop {
+                continue;
+            }
+
+            print!("\rPass 2: Processing chunk {}/{}", chunk_i + 1, n_chunks);
+            Write::flush(&mut std::io::stdout()).context("Failed to flush stdout")?;
+
+            let chunk_data_f16 =
+                load_chunk_hdf5(dataset_path, start, stop, self.dimensionality)?.to(device);
+            if chunk_data_f16.size()[0] == 0 {
+                continue;
+            }
+
+            let chunk_data_f32 = chunk_data_f16.to_kind(Kind::Float);
+            let chunk_labels = no_grad(|| self.predict(&chunk_data_f32, 1).1.reshape([-1]));
+            let labels_vec: Vec<i64> = chunk_labels
+                .try_into()
+                .context("Pass 2: Failed to convert labels tensor to Vec<i64>")?;
+
+            let chunk_original_indices =
+                Tensor::arange_start(start as i64, stop as i64, (Kind::Int64, device));
+
+            for i in 0..chunk_data_f16.size()[0] {
+                let label = labels_vec[i as usize];
+                let dest_row = *current_write_idx
+                    .get(&label)
+                    .ok_or_else(|| anyhow::anyhow!("Missing write index for bucket {}", label))?;
+
+                let vector_f16 = chunk_data_f16.get(i);
+                let original_index = chunk_original_indices.get(i);
+
+                if let Some(target_data_tensor) = self.bucket_data.get_mut(&label) {
+                    if dest_row < target_data_tensor.size()[0] as usize {
+                        target_data_tensor
+                            .i((dest_row as i64, ..))
+                            .copy_(&vector_f16);
+                    } else {
+                        eprintln!(
+                            "\nWarning: Write index {} out of bounds for bucket {} data (size {})",
+                            dest_row,
+                            label,
+                            target_data_tensor.size()[0]
+                        );
+                    }
+                }
+                if let Some(target_ids_tensor) = self.bucket_data_ids.get_mut(&label) {
+                    if dest_row < target_ids_tensor.size()[0] as usize {
+                        target_ids_tensor.i(dest_row as i64).copy_(&original_index);
+                    } else {
+                        eprintln!(
+                            "\nWarning: Write index {} out of bounds for bucket {} ids (size {})",
+                            dest_row,
+                            label,
+                            target_ids_tensor.size()[0]
+                        );
+                    }
+                }
+
+                *current_write_idx.get_mut(&label).unwrap() += 1;
+            }
+
+            drop(chunk_data_f16);
+            drop(chunk_data_f32);
+            drop(chunk_original_indices);
+        }
+
+        println!("\nSerial bucket creation finished (f16).");
+        Ok(())
     }
 
     #[allow(unused)]
@@ -285,11 +468,7 @@ impl RustLmi {
 
                     similarities[i] = (
                         unsafe {
-                            dot_product(
-                                query_slice.as_ptr(),
-                                bucket_vector.as_ptr(),
-                                vector_dim,
-                            )
+                            dot_product(query_slice.as_ptr(), bucket_vector.as_ptr(), vector_dim)
                         },
                         i as i32,
                     );
@@ -322,7 +501,13 @@ impl RustLmi {
     }
 
     pub fn search_raw_multiple_nprobe(&self, queries: &Tensor, k: i64, nprobe: i64) -> Tensor {
-        let (_, bucket_ids_per_query) = self.predict(queries, nprobe); // [n_queries, nprobe]
+        let queries = if queries.kind() == Kind::Float {
+            queries.shallow_clone()
+        } else {
+            queries.to_kind(Kind::Float)
+        };
+
+        let (_, bucket_ids_per_query) = self.predict(&queries, nprobe); // [n_queries, nprobe]
 
         let n_queries = queries.size()[0];
         let mut all_results: Vec<Tensor> = Vec::with_capacity(n_queries as usize);
@@ -330,7 +515,7 @@ impl RustLmi {
             all_results.push(Tensor::zeros(&[k], (Kind::Int64, queries.device())));
         }
 
-        let queries_raw = to_raw_ptr(queries);
+        let queries_raw = to_raw_ptr(&queries);
         let bucket_ids_per_query_raw = to_raw_ptr(&bucket_ids_per_query);
         let self_raw = to_raw_ptr(self);
 
@@ -371,7 +556,7 @@ impl RustLmi {
                         }
                         let vector_dim = bucket_data.size()[1] as usize;
 
-                        let bucket_data_ptr: *const f32 = bucket_data.data_ptr() as *const f32;
+                        let bucket_data_ptr: *const f16 = bucket_data.data_ptr() as *const f16;
                         let bucket_slice = unsafe {
                             std::slice::from_raw_parts(bucket_data_ptr, num_vectors * vector_dim)
                         };
@@ -386,10 +571,13 @@ impl RustLmi {
                             let end = start + vector_dim;
                             let bucket_vector = &bucket_slice[start..end];
 
+                            let bucket_vector_f32: Vec<f32> =
+                                bucket_vector.iter().map(|&h| h.to_f32()).collect();
+
                             let similarity = unsafe {
                                 dot_product(
                                     query_slice.as_ptr(),
-                                    bucket_vector.as_ptr(),
+                                    bucket_vector_f32.as_ptr(),
                                     vector_dim,
                                 )
                             };

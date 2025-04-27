@@ -1,14 +1,14 @@
 #![allow(non_snake_case)]
 #![allow(unsafe_op_in_unsafe_fn)]
 
-use tch::Tensor;
 use tch::Kind;
+use tch::Tensor;
 
 use pyo3::prelude::*;
 use pyo3_tch::PyTensor;
 
-use rust_lmi::helpers::{to_raw_ptr, from_raw_ptr};
 use rust_lmi::RustLmi;
+use rust_lmi::helpers::{from_raw_ptr, to_raw_ptr};
 
 #[allow(clippy::upper_case_acronyms)]
 #[pyclass]
@@ -60,6 +60,29 @@ impl LMI {
         });
     }
 
+    fn _create_buckets_scalable(
+        &mut self,
+        dataset_path: String,
+        n_data: usize,
+        chunk_size: usize,
+    ) -> PyResult<()> {
+        Python::with_gil(|py| {
+            py.allow_threads(|| {
+                self.rust_object
+                    .create_buckets_scalable(&dataset_path, n_data, chunk_size)
+                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+            })
+        })
+    }
+
+    fn get_bucket(&self, bucket_id: i64) -> PyTensor {
+        PyTensor(self.rust_object.bucket_data[&bucket_id].shallow_clone())
+    }
+
+    fn print_bucket_info(&self) {
+        println!("Bucket data: {:?}", self.rust_object.bucket_data);
+    }
+
     fn search(&self, query: PyTensor, k: i64) -> PyTensor {
         PyTensor(self.rust_object.search(&query, k))
     }
@@ -77,7 +100,10 @@ impl LMI {
     }
 
     fn search_raw_multiple_nprobe(&self, queries: PyTensor, k: i64, nprobe: i64) -> PyTensor {
-        PyTensor(self.rust_object.search_raw_multiple_nprobe(&queries, k, nprobe))
+        PyTensor(
+            self.rust_object
+                .search_raw_multiple_nprobe(&queries, k, nprobe),
+        )
     }
 
     fn test_read_raw_tensor(&self) {

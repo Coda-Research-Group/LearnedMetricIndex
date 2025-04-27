@@ -87,7 +87,6 @@ class LMI:
         del X_train
         gc.collect()
 
-        X = torch.from_numpy(h5py.File(dataset, "r")["emb"][:]).to(torch.float32)
-        lmi._create_buckets(X)
+        lmi._create_buckets_scalable(str(dataset), n_data, chunk_size)
 
         return lmi

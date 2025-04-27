@@ -3,7 +3,6 @@ from typing import Optional
 from torch.nn import Sequential
 from pathlib import Path
 
-
 class LMI:
     """
     Learned Metric Index (LMI) for efficient similarity search.
@@ -54,14 +53,28 @@ class LMI:
         """
         ...
 
-    def build(self, X: torch.Tensor, epochs: int, lr: float) -> None:
+    def _create_buckets_scalable(
+        self, dataset_path_str: str, n_data: int, chunk_size: int
+    ) -> None:
         """
-        Build the complete LMI by internally calling _run_kmeans, _train_model and _create_buckets.
+        Create buckets by assigning data points to buckets using the trained model.
+        """
+        ...
 
-        Args:
-            X: Input data tensor of shape (n_samples, dimensionality)
-            epochs: Number of training epochs
-            lr: Learning rate
+    def create(
+        self,
+        dataset: Path,
+        epochs: int,
+        lr: float,
+        sample_size: int,
+        n_buckets: int,
+        chunk_size: int,
+        model: Optional[Sequential] = None,
+        reduced_dim: Optional[int] = None,
+        SEED: int = 42,
+    ) -> None:
+        """
+        Create the LMI by internally calling _run_kmeans, _train_model and _create_buckets_scalable.
         """
         ...
 
