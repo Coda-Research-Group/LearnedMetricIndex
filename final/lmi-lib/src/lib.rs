@@ -10,11 +10,10 @@ use pyo3_tch::PyTensor;
 use rust_lmi::RustLmi;
 use rust_lmi::helpers::{from_raw_ptr, to_raw_ptr};
 
-use std::fmt::Write;
 use time::macros::format_description;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
-use tracing_subscriber::fmt::{format, time::LocalTime};
+use tracing_subscriber::fmt::time::LocalTime;
 
 #[allow(clippy::upper_case_acronyms)]
 #[pyclass]
@@ -45,7 +44,7 @@ impl LMI {
             "[year]-[month]-[day] [hour]:[minute]:[second].[subsecond digits:3]"
         ));
 
-        let subscriber = FmtSubscriber::builder()
+        let _ = FmtSubscriber::builder()
             .with_max_level(Level::DEBUG)
             .with_timer(time_format)
             .with_level(true)

@@ -41,8 +41,8 @@ def search(queries, k):
 logger.debug("Loading queries...")
 queries = utils.load_queries()
 
-# nprobes = [1, 2, 5, 10, 20]
-nprobes = [5]
+nprobes = [1, 2, 5, 10, 20]
+# nprobes = [5]
 
 for nprobe in nprobes:
     now = time.time()
