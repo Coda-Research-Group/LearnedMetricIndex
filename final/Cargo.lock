@@ -662,7 +662,7 @@ dependencies = [
 
 [[package]]
 name = "lmi"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "pyo3",
  "pyo3-tch",
