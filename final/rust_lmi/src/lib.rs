@@ -248,7 +248,7 @@ impl RustLmi {
             drop(chunk_data_f16);
             drop(chunk_data_f32);
         }
-        info!("\nPass 1: Counting complete.");
+        info!("Pass 1: Counting complete.");
 
         // --- Bucket Initialization ---
         info!("Initializing Bucket Storage (f16)...");
@@ -348,7 +348,7 @@ impl RustLmi {
             drop(chunk_original_indices);
         }
 
-        info!("\nSerial bucket creation finished (f16).");
+        info!("Serial bucket creation finished (f16).");
         Ok(())
     }
 
