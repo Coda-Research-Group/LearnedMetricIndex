@@ -16,9 +16,9 @@ torch.manual_seed(SEED)
 
 DEFAULT_DATASET_SIZE = "300K"
 DEFAULT_EPOCHS = 15
-DEFAULT_LR = 0.001
-DEFAULT_SAMPLE_SIZE = 100000
-DEFAULT_CHUNK_SIZE = 100000
+DEFAULT_LR = 0.00098
+DEFAULT_SAMPLE_SIZE = 1_000_000
+DEFAULT_CHUNK_SIZE = 1_000_000
 DEFAULT_ALPHA = 1.0
 DEFAULT_K = 30
 DEFAULT_NPROBES = range(1, 6)
@@ -69,7 +69,7 @@ parser.add_argument(
     help="List of nprobe values to test",
 )
 parser.add_argument(
-    "--output-dir", type=str, default="result_rust", help="Directory to store results"
+    "--output-dir", type=str, default="result", help="Directory to store results"
 )
 
 args = parser.parse_args()

@@ -11,10 +11,6 @@ import gc
 from pathlib import Path
 from typing import Optional
 from loguru import logger
-import time
-from sklearn.decomposition import TruncatedSVD
-
-import h5py
 
 
 class LMI:
@@ -86,11 +82,6 @@ class LMI:
 
         lmi = LMI(model, n_buckets, data_dim)
         lmi._train_model(X_train, y, epochs, lr)
-
-        if reduced_dim is not None:
-            tsvd = TruncatedSVD(reduced_dim, random_state=SEED)
-            start = time.time()
-            tsvd.fit(X_train)
 
         del X_train
         gc.collect()

@@ -143,7 +143,7 @@ impl RustLmi {
         let kmeans = kmeans.kmeans_minibatch(
             4096,
             n_buckets as usize,
-            100,
+            500,
             KMeans::init_random_sample,
             &conf,
         );
