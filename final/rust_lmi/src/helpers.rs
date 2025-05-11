@@ -1,6 +1,8 @@
 use std::arch::x86_64::_mm256_loadu_ps;
 use std::arch::x86_64::*;
 
+// use std::cmp::Ordering;
+
 #[allow(unused)]
 pub fn to_raw_ptr<T>(x: &T) -> usize {
     let x_ptr = x as *const T;

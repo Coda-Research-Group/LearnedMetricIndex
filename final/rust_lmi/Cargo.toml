@@ -17,6 +17,9 @@ serde_json = "1.0.140"
 anyhow = "1.0.98"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.18", features = ["fmt", "chrono"] }
+petal-decomposition = { version = "0.8", features = ["openblas-static"] }
+rand_pcg = "0.3.1"
+
 
 [dev-dependencies]
 rand = { version = "0.8.5", features = ["small_rng"] }

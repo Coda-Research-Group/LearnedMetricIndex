@@ -22,14 +22,16 @@ use rayon::prelude::*;
 pub mod helpers;
 use helpers::{dot_product, from_raw_ptr, to_raw_ptr};
 
-use anyhow::{Context, Result};
 use half::f16;
 use hdf5::File;
-use ndarray::Array2;
 use ndarray::s;
+use ndarray::Array2;
 use std::io::Write;
 use std::path::Path;
-use tracing::{info, error};
+use tracing::{error, info};
+
+use petal_decomposition::{RandomizedPca, RandomizedPcaBuilder};
+use rand_pcg::Mcg128Xsl64;
 
 const SEED: i64 = 42;
 
@@ -60,11 +62,9 @@ fn create_model_from_json(model_json: &str, path: &nn::Path) -> Sequential {
     seq
 }
 
-fn load_chunk_hdf5(dataset_path: &Path, start: usize, stop: usize, dim: i64) -> Result<Tensor> {
-    let file = File::open(dataset_path).context("Failed to open HDF5 file")?;
-    let dataset = file
-        .dataset("emb")
-        .context("Failed to open 'emb' dataset")?;
+fn load_chunk_hdf5(dataset_path: &Path, start: usize, stop: usize, dim: i64) -> Tensor {
+    let file = File::open(dataset_path).unwrap();
+    let dataset = file.dataset("emb").unwrap();
     let hdf5_shape = dataset.shape();
     let actual_dim = hdf5_shape.get(1).cloned().unwrap_or(dim as usize) as i64;
 
@@ -72,32 +72,34 @@ fn load_chunk_hdf5(dataset_path: &Path, start: usize, stop: usize, dim: i64) -> 
     let n_rows = actual_stop.saturating_sub(start);
 
     if n_rows == 0 {
-        return Ok(Tensor::empty(&[0, actual_dim], (Kind::Half, Device::Cpu)));
+        return Tensor::empty(&[0, actual_dim], (Kind::Half, Device::Cpu));
     }
 
     let data_ndarray: Array2<f16> = dataset
         .read_slice::<f16, _, _>(s![start..actual_stop, ..])
-        .context("Failed to read slice from HDF5 dataset")?;
+        .unwrap();
     let data_vec: Vec<f16> = data_ndarray.into_raw_vec_and_offset().0;
 
     let tensor = Tensor::from_slice(&data_vec)
         .reshape(&[n_rows as i64, actual_dim])
         .to_kind(Kind::Half);
 
-    Ok(tensor)
+    tensor
 }
 
 pub struct RustLmi {
     pub n_buckets: i64,
+    pub original_dimensionality: i64,
     pub dimensionality: i64,
     pub bucket_data: HashMap<i64, Tensor>,
     pub bucket_data_ids: HashMap<i64, Tensor>,
     pub model: Sequential,
     pub vs: nn::VarStore,
+    pub tsvd: Option<RandomizedPca<f32, Mcg128Xsl64>>,
 }
 
 impl RustLmi {
-    pub fn new(model_json: &str, n_buckets: i64, data_dimensionality: i64) -> Self {
+    pub fn new(model_json: &str, n_buckets: i64, dimensionality: i64) -> Self {
         let vs = nn::VarStore::new(Device::cuda_if_available());
         let path = &vs.root();
 
@@ -105,11 +107,13 @@ impl RustLmi {
 
         RustLmi {
             n_buckets,
-            dimensionality: data_dimensionality,
+            dimensionality,
+            original_dimensionality: dimensionality,
             bucket_data: HashMap::new(),
             bucket_data_ids: HashMap::new(),
             model,
             vs,
+            tsvd: None,
         }
     }
 
@@ -148,6 +152,9 @@ impl RustLmi {
             &conf,
         );
 
+        // let kmeans =
+        //     kmeans.kmeans_lloyd(n_buckets as usize, 500, KMeans::init_random_sample, &conf);
+
         let assignments = kmeans
             .assignments
             .iter()
@@ -159,7 +166,9 @@ impl RustLmi {
 
     #[allow(unused_variables)]
     pub fn train_model(&mut self, X: &Tensor, y: &Tensor, epochs: i64, lr: f64) {
-        let train_loader = Iter2::new(X, &y, 256).collect::<Vec<_>>();
+        let X = self.transform_tsvd(X);
+
+        let train_loader = Iter2::new(&X, &y, 256).collect::<Vec<_>>();
         let mut optimizer = nn::Adam::default().build(&self.vs, lr).unwrap();
 
         for epoch in 1..=epochs {
@@ -175,10 +184,64 @@ impl RustLmi {
                 "Epoch {} | Loss {:.5}",
                 epoch,
                 self.model
-                    .forward(X)
+                    .forward(&X)
                     .cross_entropy_for_logits(&y)
                     .double_value(&[])
             );
+        }
+    }
+
+    pub fn fit_tsvd(&mut self, X_train: &Tensor, reduced_dim: usize) {
+        let train_size = X_train.size();
+        let n_samples = train_size[0] as usize;
+        let n_features = self.dimensionality as usize;
+
+        let X_train_f32 = if X_train.kind() == Kind::Float {
+            X_train.shallow_clone()
+        } else {
+            X_train.to_kind(Kind::Float)
+        };
+        let X_train_cpu = X_train_f32.to(Device::Cpu);
+        let train_data_vec: Vec<f32> = X_train_cpu.reshape([-1]).try_into().unwrap();
+
+        let X_train_ndarray =
+            Array2::from_shape_vec((n_samples, n_features), train_data_vec).unwrap();
+
+        let pca_builder = RandomizedPcaBuilder::new(reduced_dim).centering(false);
+
+        let mut pca = pca_builder.build();
+        pca.fit(&X_train_ndarray).unwrap();
+
+        self.dimensionality = reduced_dim as i64;
+        self.tsvd = Some(pca);
+    }
+
+    pub fn transform_tsvd(&self, X: &Tensor) -> Tensor {
+        if let Some(pca) = &self.tsvd {
+            let n_queries = X.size()[0] as usize;
+            let n_features = X.size()[1] as usize;
+
+            let X_f32 = if X.kind() == Kind::Float {
+                X.shallow_clone()
+            } else {
+                X.to_kind(Kind::Float)
+            };
+            let X_cpu = X_f32.to(Device::Cpu);
+            let X_vec: Vec<f32> = X_cpu.reshape([-1]).try_into().unwrap();
+
+            let X_ndarray = Array2::from_shape_vec((n_queries, n_features), X_vec).unwrap();
+
+            let transformed_ndarray = pca.transform(&X_ndarray).unwrap();
+
+            let transformed_vec: Vec<f32> = transformed_ndarray.into_raw_vec_and_offset().0;
+
+            let result_tensor = Tensor::from_slice(&transformed_vec)
+                .reshape(&[n_queries as i64, self.dimensionality as i64])
+                .to(X.device());
+
+            result_tensor
+        } else {
+            X.shallow_clone()
         }
     }
 
@@ -209,7 +272,7 @@ impl RustLmi {
         dataset_path_str: &str,
         n_data: usize,
         chunk_size: usize,
-    ) -> Result<()> {
+    ) {
         let dataset_path = Path::new(dataset_path_str);
         let n_chunks = (n_data + chunk_size - 1) / chunk_size;
         let device = self.vs.device();
@@ -226,20 +289,18 @@ impl RustLmi {
             }
 
             info!("Pass 1: Processing chunk {}/{}", chunk_i + 1, n_chunks);
-            Write::flush(&mut std::io::stdout()).context("Failed to flush stdout")?;
+            Write::flush(&mut std::io::stdout()).unwrap();
 
             let chunk_data_f16 =
-                load_chunk_hdf5(dataset_path, start, stop, self.dimensionality)?.to(device);
+                load_chunk_hdf5(dataset_path, start, stop, self.original_dimensionality).to(device);
             if chunk_data_f16.size()[0] == 0 {
                 continue;
             }
             let chunk_data_f32 = chunk_data_f16.to_kind(Kind::Float);
-
+            let chunk_data_f32 = self.transform_tsvd(&chunk_data_f32).to_kind(Kind::Float);
             let chunk_labels = no_grad(|| self.predict(&chunk_data_f32, 1).1.reshape([-1]));
 
-            let labels_vec: Vec<i64> = chunk_labels
-                .try_into()
-                .context("Pass 1: Failed to convert labels tensor to Vec<i64>")?;
+            let labels_vec: Vec<i64> = chunk_labels.try_into().unwrap();
 
             for label in labels_vec {
                 *total_counts.entry(label).or_insert(0) += 1;
@@ -287,28 +348,26 @@ impl RustLmi {
             }
 
             info!("Pass 2: Processing chunk {}/{}", chunk_i + 1, n_chunks);
-            Write::flush(&mut std::io::stdout()).context("Failed to flush stdout")?;
+            Write::flush(&mut std::io::stdout()).unwrap();
 
             let chunk_data_f16 =
-                load_chunk_hdf5(dataset_path, start, stop, self.dimensionality)?.to(device);
+                load_chunk_hdf5(dataset_path, start, stop, self.original_dimensionality).to(device);
             if chunk_data_f16.size()[0] == 0 {
                 continue;
             }
-
             let chunk_data_f32 = chunk_data_f16.to_kind(Kind::Float);
+            let chunk_data_f32 = self.transform_tsvd(&chunk_data_f32).to_kind(Kind::Float);
+            let chunk_data_f16 = chunk_data_f32.to_kind(Kind::Half);
             let chunk_labels = no_grad(|| self.predict(&chunk_data_f32, 1).1.reshape([-1]));
-            let labels_vec: Vec<i64> = chunk_labels
-                .try_into()
-                .context("Pass 2: Failed to convert labels tensor to Vec<i64>")?;
+            drop(chunk_data_f32);
+            let labels_vec: Vec<i64> = chunk_labels.try_into().unwrap();
 
             let chunk_original_indices =
                 Tensor::arange_start(start as i64, stop as i64, (Kind::Int64, device));
 
             for i in 0..chunk_data_f16.size()[0] {
                 let label = labels_vec[i as usize];
-                let dest_row = *current_write_idx
-                    .get(&label)
-                    .ok_or_else(|| anyhow::anyhow!("Missing write index for bucket {}", label))?;
+                let dest_row = *current_write_idx.get(&label).unwrap();
 
                 let vector_f16 = chunk_data_f16.get(i);
                 let original_index = chunk_original_indices.get(i);
@@ -344,12 +403,10 @@ impl RustLmi {
             }
 
             drop(chunk_data_f16);
-            drop(chunk_data_f32);
             drop(chunk_original_indices);
         }
 
         info!("Serial bucket creation finished (f16).");
-        Ok(())
     }
 
     #[allow(unused)]
@@ -502,6 +559,7 @@ impl RustLmi {
     }
 
     pub fn search_raw_multiple_nprobe(&self, queries: &Tensor, k: i64, nprobe: i64) -> Tensor {
+        let queries = self.transform_tsvd(queries);
         let queries = if queries.kind() == Kind::Float {
             queries.shallow_clone()
         } else {

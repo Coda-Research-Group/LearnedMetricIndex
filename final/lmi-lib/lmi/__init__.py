@@ -12,6 +12,10 @@ from pathlib import Path
 from typing import Optional
 from loguru import logger
 
+from sklearn.decomposition import TruncatedSVD
+import time
+import h5py
+
 
 class LMI:
     def __init__(self, model, *args, **kwargs):
@@ -21,8 +25,8 @@ class LMI:
     def __getattr__(self, name):
         return getattr(self._inner, name)
 
-    @utils.measure_runtime
     @staticmethod
+    @utils.measure_runtime
     def _run_kmeans(
         n_buckets: int, dimensionality: int, X: torch.Tensor
     ) -> torch.Tensor:
@@ -74,13 +78,26 @@ class LMI:
         y = LMI._run_kmeans(n_buckets, data_dim, X_train)
 
         if model is None:
+            if reduced_dim is not None:
+                dim = reduced_dim
+            else:
+                dim = data_dim
+
             model = Sequential(
-                Linear(data_dim, 512),
+                Linear(dim, 512),
                 ReLU(),
                 Linear(512, n_buckets),
             )
 
         lmi = LMI(model, n_buckets, data_dim)
+
+        if reduced_dim is not None:
+            logger.debug(f"Fitting TSVD from {data_dim} to {reduced_dim} dimensions")
+            start = time.time()
+            lmi._fit_tsvd(X_train, reduced_dim)
+            fit_tsvd_time = time.time() - start
+            logger.debug(f"TSVD fitting time: {fit_tsvd_time:.2f} seconds")
+
         lmi._train_model(X_train, y, epochs, lr)
 
         del X_train

@@ -72,6 +72,16 @@ impl LMI {
         });
     }
 
+    fn _fit_tsvd(&mut self, X: PyTensor, reduced_dim: usize) {
+        let raw_ptr = to_raw_ptr(&X);
+        Python::with_gil(|py| {
+            py.allow_threads(|| {
+                let X = from_raw_ptr::<Tensor>(raw_ptr);
+                self.rust_object.fit_tsvd(X, reduced_dim);
+            });
+        });
+    }
+
     fn _create_buckets(&mut self, X: PyTensor) {
         let raw_ptr = to_raw_ptr(&X);
         Python::with_gil(|py| {
@@ -82,17 +92,11 @@ impl LMI {
         });
     }
 
-    fn _create_buckets_scalable(
-        &mut self,
-        dataset_path: String,
-        n_data: usize,
-        chunk_size: usize,
-    ) -> PyResult<()> {
+    fn _create_buckets_scalable(&mut self, dataset_path: String, n_data: usize, chunk_size: usize) {
         Python::with_gil(|py| {
             py.allow_threads(|| {
                 self.rust_object
-                    .create_buckets_scalable(&dataset_path, n_data, chunk_size)
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+                    .create_buckets_scalable(&dataset_path, n_data, chunk_size);
             })
         })
     }

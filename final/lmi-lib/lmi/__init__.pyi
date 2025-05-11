@@ -1,3 +1,4 @@
+from sympy import O
 import torch
 from typing import Optional
 from torch.nn import Sequential
@@ -15,6 +16,8 @@ class LMI:
         n_buckets: Number of buckets to partition the data into
         dimensionality: Dimensionality of the input data vectors
     """
+
+    def init_logging(self) -> None: ...
 
     def __init__(self, n_buckets: int, data_dimensionality: int) -> None: ...
     def run_tests(self) -> None: ...
@@ -43,6 +46,15 @@ class LMI:
             lr: Learning rate
         """
         ...
+
+
+    def _fit_tsvd(self, X: torch.Tensor, reduced_dim: int) -> None:
+        """
+        Fit a truncated SVD to the input data.
+
+        Args:
+            X: Input data tensor of shape (n_samples, dimensionality)
+
 
     def _create_buckets(self, X: torch.Tensor) -> None:
         """
