@@ -188,6 +188,25 @@ pub fn k_largest<T: PartialOrd + Clone>(vec: &mut Vec<T>, k: usize) -> Vec<T> {
     result
 }
 
+pub fn k_largest_tuples(mut vec: Vec<(f32, i64)>, k: usize) -> Vec<(f32, i64)> {
+    if k == 0 || vec.is_empty() {
+        return vec![];
+    }
+    let len = vec.len();
+    if k >= len {
+        vec.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+        return vec;
+    }
+
+    let pivot_index = len - k;
+    vec.select_nth_unstable_by(pivot_index, |a, b| a.0.partial_cmp(&b.0).unwrap());
+
+    let mut result_slice = vec[pivot_index..].to_vec();
+    result_slice.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+
+    result_slice
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

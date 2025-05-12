@@ -47,8 +47,25 @@ class LMI:
     @utils.measure_runtime
     def search_raw_multiple_nprobe(
         self, queries: torch.Tensor, k: int, nprobe: int
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         return self._inner.search_raw_multiple_nprobe(queries, k, nprobe)
+
+    @utils.measure_runtime
+    def search_with_reranking(
+        self,
+        original_queries_f32: torch.Tensor,
+        original_dataset_path_str: str,
+        final_k: int,
+        nprobe_stage1: int,
+        num_candidates_for_rerank: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        return self._inner.search_with_reranking(
+            original_queries_f32,
+            original_dataset_path_str,
+            final_k,
+            nprobe_stage1,
+            num_candidates_for_rerank,
+        )
 
     @staticmethod
     def init_logging():

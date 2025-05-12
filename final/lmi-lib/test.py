@@ -27,8 +27,8 @@ k = 30
 nprobe = 1
 
 LMI.init_logging()
-lmi = LMI.create(dataset, 15, 0.001, sample_size, n_buckets, chunk_size,
-                    #    reduced_dim=128
+lmi = LMI.create(dataset, 1, 0.001, sample_size, n_buckets, chunk_size,
+                       reduced_dim=128
                     )
 
 @utils.measure_runtime
@@ -57,10 +57,14 @@ for nprobe in nprobes:
     k = 30
     # nearest_neighbors = search(queries, k)
     # nearest_neighbors = lmi.search_raw_multiple(queries, k).detach().cpu().numpy()
-    nearest_neighbors = (
-        lmi.search_raw_multiple_nprobe(queries, k, nprobe).detach().cpu().numpy()
+    # nearest_neighbors, dists = (
+    #     lmi.search_raw_multiple_nprobe(queries, k, nprobe)
+    # )
+    # nearest_neighbors = nearest_neighbors.detach().cpu().numpy()
+    nearest_neighbors, dists = (
+        lmi.search_with_reranking(queries, str(dataset), k, nprobe, 100)
     )
-
+    nearest_neighbors = nearest_neighbors.detach().cpu().numpy()
     querytime = time.time() - now
 
     identifier = f"lmi-nprobe={nprobe}"

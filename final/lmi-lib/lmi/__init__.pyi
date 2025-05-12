@@ -18,7 +18,6 @@ class LMI:
     """
 
     def init_logging(self) -> None: ...
-
     def __init__(self, n_buckets: int, data_dimensionality: int) -> None: ...
     def run_tests(self) -> None: ...
     def _run_kmeans(self, X: torch.Tensor) -> torch.Tensor:
@@ -47,14 +46,14 @@ class LMI:
         """
         ...
 
-
     def _fit_tsvd(self, X: torch.Tensor, reduced_dim: int) -> None:
         """
         Fit a truncated SVD to the input data.
 
         Args:
             X: Input data tensor of shape (n_samples, dimensionality)
-
+        """
+        ...
 
     def _create_buckets(self, X: torch.Tensor) -> None:
         """
@@ -96,7 +95,15 @@ class LMI:
     def search_raw_multiple(self, queries: torch.Tensor, k: int) -> torch.Tensor: ...
     def search_raw_multiple_nprobe(
         self, queries: torch.Tensor, k: int, nprobe: int
-    ) -> torch.Tensor: ...
+    ) -> tuple[torch.Tensor, torch.Tensor]: ...
+    def search_with_reranking(
+        self,
+        original_queries_f32: torch.Tensor,
+        original_dataset_path_str: str,
+        final_k: int,
+        nprobe_stage1: int,
+        num_candidates_for_rerank: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]: ...
     @staticmethod
     def create(
         dataset: Path,

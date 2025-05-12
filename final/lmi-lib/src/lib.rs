@@ -121,11 +121,42 @@ impl LMI {
         PyTensor(self.rust_object.search_raw_multiple(&queries, k))
     }
 
-    fn search_raw_multiple_nprobe(&self, queries: PyTensor, k: i64, nprobe: i64) -> PyTensor {
-        PyTensor(
-            self.rust_object
-                .search_raw_multiple_nprobe(&queries, k, nprobe),
-        )
+    fn search_raw_multiple_nprobe(
+        &self,
+        queries: PyTensor,
+        k: i64,
+        nprobe: i64,
+    ) -> (PyTensor, PyTensor) {
+        let result = self
+            .rust_object
+            .search_raw_multiple_nprobe(&queries, k, nprobe);
+        (PyTensor(result.0), PyTensor(result.1))
+    }
+
+    fn search_with_reranking(
+        &self,
+        original_queries_f32: PyTensor,
+        original_dataset_path_str: String,
+        final_k: i64,
+        nprobe_stage1: i64,
+        num_candidates_for_rerank: i64,
+    ) -> PyResult<(PyTensor, PyTensor)> {
+        let raw_ptr = to_raw_ptr(&original_queries_f32);
+        let slf_ptr = to_raw_ptr(&self.rust_object);
+        let (indices, distances) = Python::with_gil(|py| {
+            py.allow_threads(|| {
+                let original_queries_f32 = from_raw_ptr::<Tensor>(raw_ptr);
+                let slf = from_raw_ptr::<RustLmi>(slf_ptr);
+                slf.search_with_reranking(
+                    &original_queries_f32,
+                    &original_dataset_path_str,
+                    final_k,
+                    nprobe_stage1,
+                    num_candidates_for_rerank,
+                )
+            })
+        });
+        Ok((PyTensor(indices), PyTensor(distances)))
     }
 
     fn test_read_raw_tensor(&self) {
