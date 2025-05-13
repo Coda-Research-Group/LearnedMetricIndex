@@ -85,25 +85,8 @@ if not dataset_path.exists():
     exit(1)
 
 logger.info(f"Loading dataset info from: {dataset_path}")
-try:
-    n_data, data_dim = utils.get_dataset_shape(dataset_path)
-    logger.info(f"Dataset shape: N={n_data}, D={data_dim}")
-except Exception as e:
-    logger.error(f"Could not read dataset shape from {dataset_path}: {e}")
-    data_dim = 768
-    logger.warning(
-        f"Could not read N from dataset, estimating based on dataset_size name '{args.dataset_size}' for n_buckets calculation."
-    )
-    size_suffix = args.dataset_size[-1].upper()
-    num_part = args.dataset_size[:-1]
-    if size_suffix == "K":
-        n_data = int(float(num_part) * 1000)
-    elif size_suffix == "M":
-        n_data = int(float(num_part) * 1000000)
-    else:
-        n_data = int(args.dataset_size)  # Assume it's just a number
-    logger.info(f"Estimated N={n_data}, Assumed D={data_dim}")
-
+n_data, data_dim = utils.get_dataset_shape(dataset_path)
+logger.info(f"Dataset shape: N={n_data}, D={data_dim}")
 
 n_buckets = int(args.alpha * sqrt(n_data))
 logger.info(f"Calculated n_buckets: {n_buckets} (alpha={args.alpha}, N={n_data})")
@@ -112,22 +95,15 @@ LMI.init_logging()
 
 logger.info("Creating LMI index (Rust backend)...")
 build_start_time = time.time()
-try:
-    lmi = LMI.create(
-        dataset=dataset_path,
-        epochs=args.epochs,
-        lr=args.lr,
-        sample_size=min(args.sample_size, n_data),
-        n_buckets=n_buckets,
-        chunk_size=args.chunk_size,
-        SEED=SEED,
-    )
-except Exception as e:
-    logger.error(f"Error during LMI creation: {e}")
-    import traceback
-
-    traceback.print_exc()
-    exit(1)
+lmi = LMI.create(
+    dataset=dataset_path,
+    epochs=args.epochs,
+    lr=args.lr,
+    sample_size=min(args.sample_size, n_data),
+    n_buckets=n_buckets,
+    chunk_size=args.chunk_size,
+    SEED=SEED,
+)
 
 buildtime = time.time() - build_start_time
 logger.success(f"LMI index created in {buildtime:.2f} seconds.")
@@ -150,28 +126,13 @@ for nprobe in args.nprobes:
     logger.info(f"Starting search with nprobe={nprobe}, k={args.k}...")
     search_start_time = time.time()
 
-    try:
-        actual_k = min(args.k, n_data)
-        nearest_neighbors = (
-            lmi.search_raw_multiple_nprobe(queries, actual_k, nprobe)
-            .detach()
-            .cpu()
-            .numpy()
-        )
-    except Exception as e:
-        logger.error(f"Error during search (nprobe={nprobe}): {e}")
-        import traceback
-
-        traceback.print_exc()
-        continue
+    actual_k = min(args.k, n_data)
+    nearest_neighbors = (
+        lmi.search_raw_multiple_nprobe(queries, actual_k, nprobe).detach().cpu().numpy()
+    )
 
     querytime = time.time() - search_start_time
     logger.success(f"Search completed for nprobe={nprobe} in {querytime:.2f} seconds.")
-
-    if nearest_neighbors.shape != (queries.shape[0], actual_k):
-        logger.warning(
-            f"Unexpected shape for nearest_neighbors: {nearest_neighbors.shape}. Expected: {(queries.shape[0], actual_k)}"
-        )
 
     identifier = f"rust-lmi-task1-ds={args.dataset_size}-ep={args.epochs}-lr={args.lr}-sample={args.sample_size}-alpha={args.alpha}-chunk={args.chunk_size}-nprobe={nprobe}"
     output_file = output_base_path / f"{identifier}.h5"
