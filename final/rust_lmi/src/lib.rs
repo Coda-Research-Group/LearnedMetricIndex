@@ -26,7 +26,6 @@ use half::f16;
 use hdf5::File;
 use ndarray::Array2;
 use ndarray::s;
-use std::io::Write;
 use std::path::Path;
 use tracing::{error, info, warn};
 
@@ -34,6 +33,11 @@ use petal_decomposition::{RandomizedPca, RandomizedPcaBuilder};
 use rand_pcg::Mcg128Xsl64;
 use std::time::Instant;
 const SEED: i64 = 42;
+
+#[derive(Clone, Copy)]
+struct SafeSendSyncMutPtr<T>(*mut T);
+unsafe impl<T> Send for SafeSendSyncMutPtr<T> {}
+unsafe impl<T> Sync for SafeSendSyncMutPtr<T> {}
 
 #[derive(Deserialize, Debug)]
 #[serde(tag = "type")]
@@ -113,7 +117,7 @@ impl RustLmi {
                 &[0, dimensionality],
                 (Kind::Half, Device::Cpu),
             ));
-            bucket_data_ids.push(Tensor::empty(&[0], (Kind::Int64, Device::Cpu)));
+            bucket_data_ids.push(Tensor::empty(&[0], (Kind::Int, Device::Cpu)));
         }
 
         RustLmi {
@@ -280,7 +284,7 @@ impl RustLmi {
     }
 
     pub fn create_buckets_scalable(
-        &mut self,
+        &mut self, // Now mutable self
         dataset_path_str: &str,
         n_data: usize,
         chunk_size: usize,
@@ -289,134 +293,208 @@ impl RustLmi {
         let n_chunks = (n_data + chunk_size - 1) / chunk_size;
         let device = self.vs.device();
 
-        info!("Pass 1: Counting items per bucket (Serial)...");
+        // === Pass 1: Counting (Parallel) ===
+        info!("Pass 1: Counting items per bucket (Parallel)...");
+        let chunk_indices: Vec<usize> = (0..n_chunks).collect();
+
+        // Use your to_raw_ptr for self. `usize` is Send + Sync.
+        let self_ptr_usize: usize = to_raw_ptr(self); // self is &RustLmi here, so *const RustLmi
+
+        let chunk_bucket_counts: Vec<HashMap<i64, usize>> = chunk_indices
+            .par_iter()
+            .map(|&chunk_i| {
+                // Reconstruct &RustLmi from usize
+                let slf: &RustLmi = from_raw_ptr(self_ptr_usize);
+
+                let start = chunk_i * chunk_size;
+                let stop = std::cmp::min((chunk_i + 1) * chunk_size, n_data);
+                if start >= stop {
+                    return HashMap::new();
+                }
+
+                let chunk_data_f16 =
+                    load_chunk_hdf5(dataset_path, start, stop, slf.original_dimensionality)
+                        .to(device);
+                if chunk_data_f16.size()[0] == 0 {
+                    return HashMap::new();
+                }
+                let chunk_data_f32 = chunk_data_f16.to_kind(Kind::Float);
+                let chunk_labels = no_grad(|| slf.predict(&chunk_data_f32, 1).1.reshape([-1]));
+
+                let labels_vec: Vec<i64> = chunk_labels.try_into().unwrap();
+                let mut local_counts = HashMap::<i64, usize>::new();
+                for label in labels_vec {
+                    *local_counts.entry(label).or_insert(0) += 1;
+                }
+                local_counts
+            })
+            .collect();
+
         let mut total_counts = HashMap::<i64, usize>::new();
-
-        for chunk_i in 0..n_chunks {
-            let start = chunk_i * chunk_size;
-            let stop = std::cmp::min((chunk_i + 1) * chunk_size, n_data);
-            if start >= stop {
-                continue;
+        for local_counts in &chunk_bucket_counts {
+            for (label, count) in local_counts {
+                *total_counts.entry(*label).or_insert(0) += count;
             }
-
-            info!("Pass 1: Processing chunk {}/{}", chunk_i + 1, n_chunks);
-            Write::flush(&mut std::io::stdout()).unwrap();
-
-            let chunk_data_f16 =
-                load_chunk_hdf5(dataset_path, start, stop, self.original_dimensionality).to(device);
-            if chunk_data_f16.size()[0] == 0 {
-                continue;
-            }
-            let chunk_data_f32 = chunk_data_f16.to_kind(Kind::Float);
-            let chunk_labels = no_grad(|| self.predict(&chunk_data_f32, 1).1.reshape([-1]));
-
-            let labels_vec: Vec<i64> = chunk_labels.try_into().unwrap();
-
-            for label in labels_vec {
-                *total_counts.entry(label).or_insert(0) += 1;
-            }
-
-            drop(chunk_data_f16);
-            drop(chunk_data_f32);
         }
         info!("Pass 1: Counting complete.");
 
-        info!("Initializing Bucket Storage (f16)...");
-        let mut current_write_idx = HashMap::<i64, usize>::new();
+        info!("Initializing Bucket Storage (f16) and calculating offsets...");
+        self.bucket_data.clear();
+        self.bucket_data_ids.clear();
+        self.bucket_data.reserve(self.n_buckets as usize);
+        self.bucket_data_ids.reserve(self.n_buckets as usize);
 
-        for bucket_id in 0..self.n_buckets {
-            let total_size = *total_counts.get(&bucket_id).unwrap_or(&0);
-            if total_size > 0 {
-                let data_tensor = Tensor::empty(
-                    &[total_size as i64, self.dimensionality],
+        let mut global_write_offsets_per_bucket_per_chunk =
+            vec![vec![0usize; n_chunks]; self.n_buckets as usize];
+
+        for bucket_id_idx in 0..self.n_buckets as usize {
+            let bucket_id = bucket_id_idx as i64;
+            let total_size_for_bucket = *total_counts.get(&bucket_id).unwrap_or(&0);
+
+            if total_size_for_bucket > 0 {
+                self.bucket_data.push(Tensor::empty(
+                    &[total_size_for_bucket as i64, self.dimensionality],
                     (Kind::Half, device),
-                );
-                let ids_tensor = Tensor::empty(&[total_size as i64], (Kind::Int64, device));
-                self.bucket_data[bucket_id as usize] = data_tensor;
-                self.bucket_data_ids[bucket_id as usize] = ids_tensor;
+                ));
+                self.bucket_data_ids.push(Tensor::empty(
+                    &[total_size_for_bucket as i64],
+                    (Kind::Int64, device),
+                ));
             } else {
-                self.bucket_data[bucket_id as usize] =
-                    Tensor::empty(&[0, self.dimensionality], (Kind::Half, device));
-                self.bucket_data_ids[bucket_id as usize] =
-                    Tensor::empty(&[0], (Kind::Int64, device));
+                self.bucket_data.push(Tensor::empty(
+                    &[0, self.dimensionality],
+                    (Kind::Half, device),
+                ));
+                self.bucket_data_ids
+                    .push(Tensor::empty(&[0], (Kind::Int64, device)));
             }
-            current_write_idx.insert(bucket_id, 0);
+
+            let mut current_offset_in_bucket = 0;
+            for chunk_idx in 0..n_chunks {
+                global_write_offsets_per_bucket_per_chunk[bucket_id_idx][chunk_idx] =
+                    current_offset_in_bucket;
+                let count_from_this_chunk = chunk_bucket_counts[chunk_idx]
+                    .get(&bucket_id)
+                    .cloned()
+                    .unwrap_or(0);
+                current_offset_in_bucket += count_from_this_chunk;
+            }
         }
 
-        let mut encdatabasetime = 0.0;
-
-        info!("Pass 2: Placing data into buckets (Serial)...");
-        for chunk_i in 0..n_chunks {
-            let start = chunk_i * chunk_size;
-            let stop = std::cmp::min((chunk_i + 1) * chunk_size, n_data);
-            if start >= stop {
-                continue;
-            }
-
-            info!("Pass 2: Processing chunk {}/{}", chunk_i + 1, n_chunks);
-            Write::flush(&mut std::io::stdout()).unwrap();
-
-            let chunk_data_f16 =
-                load_chunk_hdf5(dataset_path, start, stop, self.original_dimensionality).to(device);
-            if chunk_data_f16.size()[0] == 0 {
-                continue;
-            }
-            let mut chunk_data_f32 = chunk_data_f16.to_kind(Kind::Float);
-            let chunk_labels = no_grad(|| self.predict(&chunk_data_f32, 1).1.reshape([-1]));
-            if self.tsvd.is_some() {
-                let tsvd_time = Instant::now();
-                chunk_data_f32 = self.transform_tsvd(&chunk_data_f32).to_kind(Kind::Float);
-                let tsvd_time = tsvd_time.elapsed();
-                encdatabasetime += tsvd_time.as_secs_f64();
-            }
-            let chunk_data_f16 = chunk_data_f32.to_kind(Kind::Half);
-            drop(chunk_data_f32);
-            let labels_vec: Vec<i64> = chunk_labels.try_into().unwrap();
-
-            let chunk_original_indices =
-                Tensor::arange_start(start as i64, stop as i64, (Kind::Int64, device));
-
-            for i in 0..chunk_data_f16.size()[0] {
-                let label = labels_vec[i as usize];
-                let dest_row = *current_write_idx.get(&label).unwrap();
-
-                let vector_f16 = chunk_data_f16.get(i);
-                let original_index = chunk_original_indices.get(i);
-
-                let target_data_tensor = &mut self.bucket_data[label as usize];
-                if dest_row < target_data_tensor.size()[0] as usize {
-                    target_data_tensor
-                        .i((dest_row as i64, ..))
-                        .copy_(&vector_f16);
+        // === Pass 2: Placing data (Parallel) ===
+        let bucket_data_raw_ptrs_wrapped: Vec<SafeSendSyncMutPtr<f16>> = self
+            .bucket_data
+            .iter()
+            .map(|t| {
+                SafeSendSyncMutPtr(if t.numel() > 0 {
+                    t.data_ptr() as *mut f16
                 } else {
-                    error!(
-                        "\nWarning: Write index {} out of bounds for bucket {} data (size {})",
-                        dest_row,
-                        label,
-                        target_data_tensor.size()[0]
-                    );
+                    std::ptr::null_mut()
+                })
+            })
+            .collect();
+        let bucket_data_ids_raw_ptrs_wrapped: Vec<SafeSendSyncMutPtr<i64>> = self
+            .bucket_data_ids
+            .iter()
+            .map(|t| {
+                SafeSendSyncMutPtr(if t.numel() > 0 {
+                    t.data_ptr() as *mut i64
+                } else {
+                    std::ptr::null_mut()
+                })
+            })
+            .collect();
+
+        let reduced_dimensionality = self.dimensionality as usize;
+
+        info!("Pass 2: Placing data into buckets (Parallel)...");
+        let encdatabasetime: f64 = chunk_indices
+            .par_iter()
+            .map(|&chunk_i| {
+                let slf: &RustLmi = from_raw_ptr(self_ptr_usize);
+                let mut local_svd_time = 0.0;
+
+                let start = chunk_i * chunk_size;
+                let stop = std::cmp::min((chunk_i + 1) * chunk_size, n_data);
+                if start >= stop {
+                    return local_svd_time;
                 }
 
-                let target_ids_tensor = &mut self.bucket_data_ids[label as usize];
-                if dest_row < target_ids_tensor.size()[0] as usize {
-                    target_ids_tensor.i(dest_row as i64).copy_(&original_index);
-                } else {
-                    error!(
-                        "\nWarning: Write index {} out of bounds for bucket {} ids (size {})",
-                        dest_row,
-                        label,
-                        target_ids_tensor.size()[0]
-                    );
+                let chunk_data_f16_original =
+                    load_chunk_hdf5(dataset_path, start, stop, slf.original_dimensionality).to(device);
+                if chunk_data_f16_original.size()[0] == 0 {
+                    return local_svd_time;
                 }
 
-                *current_write_idx.get_mut(&label).unwrap() += 1;
-            }
+                let chunk_data_f32_for_pred_transform = chunk_data_f16_original.to_kind(Kind::Float);
+                let chunk_labels = no_grad(|| slf.predict(&chunk_data_f32_for_pred_transform, 1).1.reshape([-1]));
 
-            drop(chunk_data_f16);
-            drop(chunk_original_indices);
-        }
+                let chunk_data_to_store_f16 = if slf.tsvd.is_some() {
+                    let tsvd_start_time = Instant::now();
+                    let transformed_f32 = slf.transform_tsvd(&chunk_data_f32_for_pred_transform);
+                    local_svd_time += tsvd_start_time.elapsed().as_secs_f64();
+                    transformed_f32.to_kind(Kind::Half)
+                } else {
+                     if slf.original_dimensionality == slf.dimensionality {
+                        chunk_data_f16_original.shallow_clone()
+                    } else {
+                        error!("TSVD is None but dimensionalities mismatch during Pass 2 chunk processing.");
+                        chunk_data_f32_for_pred_transform.to_kind(Kind::Half)
+                    }
+                };
 
-        info!("Serial bucket creation finished (f16).");
+                let labels_vec: Vec<i64> = chunk_labels.try_into().unwrap();
+                let chunk_original_indices_global =
+                    Tensor::arange_start(start as i64, stop as i64, (Kind::Int64, device));
+
+
+                let mut items_placed_from_this_chunk_for_bucket = HashMap::<i64, usize>::new();
+
+                for i in 0..chunk_data_to_store_f16.size()[0] as usize {
+                    let label = labels_vec[i];
+                    let label_idx = label as usize;
+
+                    if label_idx >= global_write_offsets_per_bucket_per_chunk.len() ||
+                       chunk_i >= global_write_offsets_per_bucket_per_chunk[label_idx].len() ||
+                       label_idx >= bucket_data_raw_ptrs_wrapped.len() ||
+                       label_idx >= bucket_data_ids_raw_ptrs_wrapped.len() {
+                        error!("Index out of bounds before writing: label_idx={}, chunk_i={}", label_idx, chunk_i);
+                        continue;
+                    }
+
+                    let base_offset_in_global_bucket = global_write_offsets_per_bucket_per_chunk[label_idx][chunk_i];
+                    let current_local_offset_entry = items_placed_from_this_chunk_for_bucket.entry(label).or_insert(0);
+                    let dest_row_abs = base_offset_in_global_bucket + *current_local_offset_entry;
+
+                    unsafe {
+                        let src_vector_f16_tensor = chunk_data_to_store_f16.get(i as i64);
+                        let src_ptr = src_vector_f16_tensor.data_ptr() as *const f16;
+
+                        let dest_ptr_data_wrapped = bucket_data_raw_ptrs_wrapped[label_idx];
+                        if !dest_ptr_data_wrapped.0.is_null() {
+                           let dest_ptr_data = dest_ptr_data_wrapped.0.add(dest_row_abs * reduced_dimensionality);
+                           std::ptr::copy_nonoverlapping(src_ptr, dest_ptr_data, reduced_dimensionality);
+                        }
+
+                        let src_original_index_tensor = chunk_original_indices_global.get(i as i64);
+                        let src_idx_ptr = src_original_index_tensor.data_ptr() as *const i64;
+
+                        let dest_ptr_idx_wrapped = bucket_data_ids_raw_ptrs_wrapped[label_idx];
+                        if !dest_ptr_idx_wrapped.0.is_null() {
+                            let dest_ptr_idx = dest_ptr_idx_wrapped.0.add(dest_row_abs);
+                            std::ptr::copy_nonoverlapping(src_idx_ptr, dest_ptr_idx, 1);
+                        }
+                    }
+                    *current_local_offset_entry += 1;
+                }
+                local_svd_time
+            })
+            .sum::<f64>();
+
+        info!(
+            "Parallel bucket creation finished (f16). Total SVD time: {:.2}s",
+            encdatabasetime
+        );
         encdatabasetime
     }
 
@@ -499,7 +577,7 @@ impl RustLmi {
                             std::slice::from_raw_parts(bucket_data_ptr, num_vectors * vector_dim)
                         };
 
-                        let bucket_data_ids_vec: Vec<i64> = bucket_data_ids
+                        let bucket_data_ids_vec: Vec<i32> = bucket_data_ids
                             .to(Device::Cpu)
                             .try_into()
                             .unwrap_or_else(|_| vec![]);
@@ -531,7 +609,7 @@ impl RustLmi {
                             };
                             let data_id = bucket_data_ids_vec[i];
 
-                            query_similarities.push((similarity, data_id));
+                            query_similarities.push((similarity, data_id as i64));
                         }
                     }
                 }
