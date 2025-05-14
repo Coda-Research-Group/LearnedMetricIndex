@@ -168,9 +168,10 @@ impl RustLmi {
         let train_loader = Iter2::new(&X, &y, 256).collect::<Vec<_>>();
         let mut optimizer = nn::Adam::default().build(&self.vs, lr).unwrap();
 
+        let mut loss: Tensor = Tensor::zeros(&[], (Kind::Float, Device::Cpu));
         for epoch in 1..=epochs {
             for (X_batch, y_batch) in &train_loader {
-                let loss = self
+                loss = self
                     .model
                     .forward(X_batch)
                     .cross_entropy_for_logits(y_batch);
@@ -180,10 +181,7 @@ impl RustLmi {
             info!(
                 "Epoch {} | Loss {:.5}",
                 epoch,
-                self.model
-                    .forward(&X)
-                    .cross_entropy_for_logits(&y)
-                    .double_value(&[])
+                loss.double_value(&[])
             );
         }
     }
