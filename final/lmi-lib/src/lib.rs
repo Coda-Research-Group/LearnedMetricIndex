@@ -114,13 +114,14 @@ impl LMI {
     }
 
     fn get_bucket(&self, bucket_id: i64) -> PyTensor {
-        PyTensor(self.rust_object.bucket_data[&bucket_id].shallow_clone())
+        PyTensor(self.rust_object.bucket_data[bucket_id as usize].shallow_clone())
     }
 
     fn get_bucket_sizes(&self) -> PyTensor {
+        println!("EY YO");
         let mut bucket_sizes = Vec::new();
         for bucket_id in 0..self.rust_object.bucket_data.len() {
-            bucket_sizes.push(self.rust_object.bucket_data[&(bucket_id as i64)].size()[0] as i64);
+            bucket_sizes.push(self.rust_object.bucket_data[bucket_id as usize].size()[0] as i64);
         }
         PyTensor(Tensor::from_slice(&bucket_sizes))
     }

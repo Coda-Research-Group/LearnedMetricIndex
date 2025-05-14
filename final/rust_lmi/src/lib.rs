@@ -91,8 +91,8 @@ pub struct RustLmi {
     pub n_buckets: i64,
     pub original_dimensionality: i64,
     pub dimensionality: i64,
-    pub bucket_data: HashMap<i64, Tensor>,
-    pub bucket_data_ids: HashMap<i64, Tensor>,
+    pub bucket_data: Vec<Tensor>,
+    pub bucket_data_ids: Vec<Tensor>,
     pub model: Sequential,
     pub vs: nn::VarStore,
     pub tsvd: Option<RandomizedPca<f32, Mcg128Xsl64>>,
@@ -105,12 +105,23 @@ impl RustLmi {
 
         let model = create_model_from_json(model_json, path);
 
+        let mut bucket_data = Vec::with_capacity(n_buckets as usize);
+        let mut bucket_data_ids = Vec::with_capacity(n_buckets as usize);
+
+        for _ in 0..n_buckets {
+            bucket_data.push(Tensor::empty(
+                &[0, dimensionality],
+                (Kind::Half, Device::Cpu),
+            ));
+            bucket_data_ids.push(Tensor::empty(&[0], (Kind::Int64, Device::Cpu)));
+        }
+
         RustLmi {
             n_buckets,
             dimensionality,
             original_dimensionality: dimensionality,
-            bucket_data: HashMap::new(),
-            bucket_data_ids: HashMap::new(),
+            bucket_data,
+            bucket_data_ids,
             model,
             vs,
             tsvd: None,
@@ -256,21 +267,15 @@ impl RustLmi {
         let classes = self.predict(X, 1).1.reshape([-1]);
 
         for i in 0..self.n_buckets {
-            self.bucket_data.insert(
-                i,
-                X.index(&[Some(
-                    classes
-                        .eq_tensor(&Tensor::from(i as f64))
-                        .to_kind(Kind::Bool),
-                )]),
-            );
-            self.bucket_data_ids.insert(
-                i,
+            self.bucket_data[i as usize] = X.index(&[Some(
                 classes
                     .eq_tensor(&Tensor::from(i as f64))
-                    .nonzero()
-                    .reshape([-1]),
-            );
+                    .to_kind(Kind::Bool),
+            )]);
+            self.bucket_data_ids[i as usize] = classes
+                .eq_tensor(&Tensor::from(i as f64))
+                .nonzero()
+                .reshape([-1]);
         }
     }
 
@@ -317,8 +322,6 @@ impl RustLmi {
         info!("Pass 1: Counting complete.");
 
         info!("Initializing Bucket Storage (f16)...");
-        self.bucket_data.clear();
-        self.bucket_data_ids.clear();
         let mut current_write_idx = HashMap::<i64, usize>::new();
 
         for bucket_id in 0..self.n_buckets {
@@ -329,15 +332,13 @@ impl RustLmi {
                     (Kind::Half, device),
                 );
                 let ids_tensor = Tensor::empty(&[total_size as i64], (Kind::Int64, device));
-                self.bucket_data.insert(bucket_id, data_tensor);
-                self.bucket_data_ids.insert(bucket_id, ids_tensor);
+                self.bucket_data[bucket_id as usize] = data_tensor;
+                self.bucket_data_ids[bucket_id as usize] = ids_tensor;
             } else {
-                self.bucket_data.insert(
-                    bucket_id,
-                    Tensor::empty(&[0, self.dimensionality], (Kind::Half, device)),
-                );
-                self.bucket_data_ids
-                    .insert(bucket_id, Tensor::empty(&[0], (Kind::Int64, device)));
+                self.bucket_data[bucket_id as usize] =
+                    Tensor::empty(&[0, self.dimensionality], (Kind::Half, device));
+                self.bucket_data_ids[bucket_id as usize] =
+                    Tensor::empty(&[0], (Kind::Int64, device));
             }
             current_write_idx.insert(bucket_id, 0);
         }
@@ -382,31 +383,30 @@ impl RustLmi {
                 let vector_f16 = chunk_data_f16.get(i);
                 let original_index = chunk_original_indices.get(i);
 
-                if let Some(target_data_tensor) = self.bucket_data.get_mut(&label) {
-                    if dest_row < target_data_tensor.size()[0] as usize {
-                        target_data_tensor
-                            .i((dest_row as i64, ..))
-                            .copy_(&vector_f16);
-                    } else {
-                        error!(
-                            "\nWarning: Write index {} out of bounds for bucket {} data (size {})",
-                            dest_row,
-                            label,
-                            target_data_tensor.size()[0]
-                        );
-                    }
+                let target_data_tensor = &mut self.bucket_data[label as usize];
+                if dest_row < target_data_tensor.size()[0] as usize {
+                    target_data_tensor
+                        .i((dest_row as i64, ..))
+                        .copy_(&vector_f16);
+                } else {
+                    error!(
+                        "\nWarning: Write index {} out of bounds for bucket {} data (size {})",
+                        dest_row,
+                        label,
+                        target_data_tensor.size()[0]
+                    );
                 }
-                if let Some(target_ids_tensor) = self.bucket_data_ids.get_mut(&label) {
-                    if dest_row < target_ids_tensor.size()[0] as usize {
-                        target_ids_tensor.i(dest_row as i64).copy_(&original_index);
-                    } else {
-                        error!(
-                            "\nWarning: Write index {} out of bounds for bucket {} ids (size {})",
-                            dest_row,
-                            label,
-                            target_ids_tensor.size()[0]
-                        );
-                    }
+
+                let target_ids_tensor = &mut self.bucket_data_ids[label as usize];
+                if dest_row < target_ids_tensor.size()[0] as usize {
+                    target_ids_tensor.i(dest_row as i64).copy_(&original_index);
+                } else {
+                    error!(
+                        "\nWarning: Write index {} out of bounds for bucket {} ids (size {})",
+                        dest_row,
+                        label,
+                        target_ids_tensor.size()[0]
+                    );
                 }
 
                 *current_write_idx.get_mut(&label).unwrap() += 1;
@@ -485,8 +485,8 @@ impl RustLmi {
 
                 for bucket_id in nprobe_bucket_ids {
                     if let (Some(bucket_data), Some(bucket_data_ids)) = (
-                        slf.bucket_data.get(&bucket_id),
-                        slf.bucket_data_ids.get(&bucket_id),
+                        slf.bucket_data.get(bucket_id as usize),
+                        slf.bucket_data_ids.get(bucket_id as usize),
                     ) {
                         let num_vectors = bucket_data.size()[0] as usize;
                         if num_vectors == 0 {

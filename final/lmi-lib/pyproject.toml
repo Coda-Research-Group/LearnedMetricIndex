@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "lmi-rs"
-version = "0.3.4"
+version = "0.3.5"
 description = "Learned Metric Index (LMI)"
 authors = [{ name = "Marek Ličko", email = "mareklicko448@gmail.com" }]
 license = "MIT"

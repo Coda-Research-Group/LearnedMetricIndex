@@ -148,7 +148,7 @@ class LMI:
         y_train = torch.from_numpy(kmeans.index.search(X_train, 1)[1].T[0])  # type: ignore
         # y_train = LMI._run_kmeans(n_buckets, data_dim_original, X_train)
         kmeanstime = time.time() - start
-        logger.success(f"K-Means completed. Labels shape: {y_train.shape}")
+        logger.success(f"K-Means completed in {kmeanstime:.2f} seconds. Labels shape: {y_train.shape}")
 
         if model is None:
             logger.info(f"Defining default model for input dim: {data_dim_original}")
