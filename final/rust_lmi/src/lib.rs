@@ -165,11 +165,16 @@ impl RustLmi {
 
     #[allow(unused_variables)]
     pub fn train_model(&mut self, X: &Tensor, y: &Tensor, epochs: i64, lr: f64) {
-        let train_loader = Iter2::new(&X, &y, 256).collect::<Vec<_>>();
         let mut optimizer = nn::Adam::default().build(&self.vs, lr).unwrap();
 
         let mut loss: Tensor = Tensor::zeros(&[], (Kind::Float, Device::Cpu));
         for epoch in 1..=epochs {
+            let batch_size = X.size()[0];
+            let indices = Tensor::randperm(batch_size, (Kind::Int64, Device::Cpu));
+            let X_shuffled = X.index_select(0, &indices);
+            let y_shuffled = y.index_select(0, &indices);
+
+            let train_loader = Iter2::new(&X_shuffled, &y_shuffled, 256).collect::<Vec<_>>();
             for (X_batch, y_batch) in &train_loader {
                 loss = self
                     .model
@@ -178,11 +183,7 @@ impl RustLmi {
                 optimizer.backward_step(&loss);
             }
 
-            info!(
-                "Epoch {} | Loss {:.5}",
-                epoch,
-                loss.double_value(&[])
-            );
+            info!("Epoch {} | Loss {:.5}", epoch, loss.double_value(&[]));
         }
     }
 
