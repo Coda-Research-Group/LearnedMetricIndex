@@ -15,7 +15,7 @@ from loguru import logger
 from sklearn.decomposition import TruncatedSVD
 import time
 import h5py
-
+import faiss
 
 class LMI:
     def __init__(self, model, *args, **kwargs):
@@ -134,7 +134,16 @@ class LMI:
 
         logger.info(f"Running K-Means (n_buckets={n_buckets})...")
         start = time.time()
-        y_train = LMI._run_kmeans(n_buckets, data_dim_original, X_train)
+        kmeans = faiss.Kmeans(
+            d=data_dim_original,
+            k=n_buckets,
+            verbose=True,
+            seed=SEED,
+            spherical=True,
+        )
+        kmeans.train(X_train)
+        y_train = torch.from_numpy(kmeans.index.search(X_train, 1)[1].T[0])  # type: ignore
+        # y_train = LMI._run_kmeans(n_buckets, data_dim_original, X_train)
         kmeanstime = time.time() - start
         logger.success(f"K-Means completed. Labels shape: {y_train.shape}")
 
