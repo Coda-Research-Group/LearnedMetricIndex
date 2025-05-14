@@ -208,6 +208,7 @@ impl RustLmi {
         let mut pca = pca_builder.build();
         pca.fit(&X_train_ndarray).unwrap();
 
+        println!("Setting dimensionality to {}", reduced_dim);
         self.dimensionality = reduced_dim as i64;
         self.tsvd = Some(pca);
     }
@@ -228,8 +229,18 @@ impl RustLmi {
             let X_ndarray = Array2::from_shape_vec((n_queries, n_features), X_vec).unwrap();
 
             let transformed_ndarray = pca.transform(&X_ndarray).unwrap();
-
             let transformed_vec: Vec<f32> = transformed_ndarray.into_raw_vec_and_offset().0;
+
+            for (i, &val) in transformed_vec.iter().enumerate() {
+                if val.is_nan() || val.is_infinite() {
+                    error!(
+                        "SVD transform produced NaN/Inf at index {} of a vector: {}",
+                        i % n_features,
+                        val
+                    );
+                    // Consider panicking here for debugging or handling it
+                }
+            }
 
             let result_tensor = Tensor::from_slice(&transformed_vec)
                 .reshape(&[n_queries as i64, self.dimensionality as i64])
@@ -427,13 +438,11 @@ impl RustLmi {
         } else {
             full_dim_queries.shallow_clone()
         };
-
         let queries = if queries.kind() == Kind::Float {
             queries.shallow_clone()
         } else {
             queries.to_kind(Kind::Float)
         };
-
         let device = queries.device();
 
         let (_, bucket_ids_per_query) = self.predict(&full_dim_queries, nprobe); // [n_queries, nprobe]
@@ -644,7 +653,7 @@ impl RustLmi {
             );
         }
 
-        // --- Stage 2a: Collect all unique, valid candidate IDs across all queries ---
+        info!("Reranking Stage 2: Collecting unique candidates...");
         let mut unique_candidates = HashSet::<i64>::new();
         for i in 0..n_queries {
             let query_candidate_ids_tensor = candidate_indices_batch.i(i);

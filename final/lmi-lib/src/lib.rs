@@ -86,6 +86,7 @@ impl LMI {
                 self.rust_object.fit_tsvd(X, reduced_dim);
             });
         });
+        self.dimensionality = self.rust_object.dimensionality;
     }
 
     fn _create_buckets(&mut self, X: PyTensor) {
@@ -143,13 +144,13 @@ impl LMI {
         nprobe: i64,
         transformed_queries: Option<PyTensor>,
     ) -> (PyTensor, PyTensor) {
-        let result = self.rust_object.search(
+        let (indices, distances) = self.rust_object.search(
             &full_dim_queries,
             k,
             nprobe,
             transformed_queries.as_ref().map(|t| &**t),
         );
-        (PyTensor(result.0), PyTensor(result.1))
+        (PyTensor(indices), PyTensor(distances))
     }
 
     fn search_with_reranking(
@@ -161,25 +162,14 @@ impl LMI {
         num_candidates_for_rerank: i64,
         transformed_queries: Option<PyTensor>,
     ) -> (PyTensor, PyTensor) {
-        let raw_ptr = to_raw_ptr(&original_queries_f32);
-        let slf_ptr = to_raw_ptr(&self.rust_object);
-        let transformed_queries_ptr = transformed_queries.as_ref().map(|t| to_raw_ptr(&t));
-        let (indices, distances) = Python::with_gil(|py| {
-            py.allow_threads(|| {
-                let original_queries_f32 = from_raw_ptr::<Tensor>(raw_ptr);
-                let transformed_queries =
-                    transformed_queries_ptr.map(|ptr| from_raw_ptr::<Tensor>(ptr));
-                let slf = from_raw_ptr::<RustLmi>(slf_ptr);
-                slf.search_with_reranking(
-                    &original_queries_f32,
-                    &original_dataset_path_str,
-                    final_k,
-                    nprobe_stage1,
-                    num_candidates_for_rerank,
-                    transformed_queries.as_ref().map(|t| &**t),
-                )
-            })
-        });
+        let (indices, distances) = self.rust_object.search_with_reranking(
+            &original_queries_f32,
+            &original_dataset_path_str,
+            final_k,
+            nprobe_stage1,
+            num_candidates_for_rerank,
+            transformed_queries.as_ref().map(|t| &**t),
+        );
         (PyTensor(indices), PyTensor(distances))
     }
 

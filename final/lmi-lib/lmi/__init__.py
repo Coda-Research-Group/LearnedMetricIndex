@@ -17,6 +17,7 @@ import time
 import h5py
 import faiss
 
+
 class LMI:
     def __init__(self, model, *args, **kwargs):
         model_config = extract_model_config(model)
@@ -41,7 +42,9 @@ class LMI:
         return self._inner._create_buckets(X)
 
     @utils.measure_runtime
-    def _create_buckets_scalable(self, dataset: Path, n_data: int, chunk_size: int) -> float:
+    def _create_buckets_scalable(
+        self, dataset: Path, n_data: int, chunk_size: int
+    ) -> float:
         return self._inner._create_buckets_scalable(dataset, n_data, chunk_size)
 
     @staticmethod
@@ -161,9 +164,7 @@ class LMI:
         start = time.time()
         lmi._train_model(X_train, y_train, epochs, lr)
         trainmodeltime = time.time() - start
-        logger.success(
-            f"LMI model training completed in {trainmodeltime:.2f} seconds."
-        )
+        logger.success(f"LMI model training completed in {trainmodeltime:.2f} seconds.")
 
         modelingtime = 0.0
         if reduced_dim is not None and reduced_dim > 0:
