@@ -9,4 +9,4 @@ python run.py \
     --chunk-size-build 100000 \
     --alpha 1.0 \
     --k 30 \
-    --nprobes 1 \
+    --nprobes 1 2 3 4 5 \

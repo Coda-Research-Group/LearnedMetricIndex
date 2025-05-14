@@ -72,6 +72,12 @@ impl LMI {
         });
     }
 
+    fn _predict(&self, X: PyTensor, top_k: i64) -> PyTensor {
+        let raw_ptr = to_raw_ptr(&X);
+        let X = from_raw_ptr::<Tensor>(raw_ptr);
+        PyTensor(self.rust_object.predict(X, top_k).1)
+    }
+
     fn _fit_tsvd(&mut self, X: PyTensor, reduced_dim: usize) {
         let raw_ptr = to_raw_ptr(&X);
         Python::with_gil(|py| {
@@ -108,6 +114,14 @@ impl LMI {
 
     fn get_bucket(&self, bucket_id: i64) -> PyTensor {
         PyTensor(self.rust_object.bucket_data[&bucket_id].shallow_clone())
+    }
+
+    fn get_bucket_sizes(&self) -> PyTensor {
+        let mut bucket_sizes = Vec::new();
+        for bucket_id in 0..self.rust_object.bucket_data.len() {
+            bucket_sizes.push(self.rust_object.bucket_data[&(bucket_id as i64)].size()[0] as i64);
+        }
+        PyTensor(Tensor::from_slice(&bucket_sizes))
     }
 
     fn transform_tsvd(&self, X: PyTensor) -> PyTensor {

@@ -156,8 +156,16 @@ output_task_path = Path(args.output_dir) / f"task{args.task}" / args.dataset_siz
 output_task_path.mkdir(parents=True, exist_ok=True)
 logger.info(f"Results will be stored in: {output_task_path}")
 
-for nprobe_val in args.nprobes:
-    logger.info(f"Starting search: nprobe={nprobe_val}, k={args.k}")
+bucket_sizes = lmi.get_bucket_sizes().numpy().astype(np.int32)
+logger.info(f"Bucket sizes: {bucket_sizes}")
+logger.info(f"Max bucket size: {bucket_sizes.max()}")
+logger.info(f"Min bucket size: {bucket_sizes.min()}")
+logger.info(f"Mean bucket size: {bucket_sizes.mean()}")
+logger.info(f"Std bucket size: {bucket_sizes.std()}")
+
+
+for nprobe in args.nprobes:
+    logger.info(f"Starting search: nprobe={nprobe}, k={args.k}")
     search_start_time = time.time()
 
     actual_k_to_search = min(args.k, n_data)
@@ -169,6 +177,15 @@ for nprobe_val in args.nprobes:
         (queries_original_dim.shape[0], actual_k_to_search), -1, dtype=np.int32
     )
 
+    # shape [n_queries, nprobe]
+    predicted_buckets = lmi._predict(queries_original_dim, nprobe).numpy().astype(np.int32)
+    print(predicted_buckets.shape)
+    # Calculate average number of objects that will be searched
+    print(f"{bucket_sizes[predicted_buckets].shape=}")
+    avg_n_objects = np.sum(np.mean(bucket_sizes[predicted_buckets], axis=0))
+    print(f"{avg_n_objects.shape=}")
+    logger.info(f"Average number of objects that will be searched: {avg_n_objects}")
+
     if args.rerank:
         logger.info(
             f"Performing search with reranking (ncandidates={args.ncandidates_rerank})..."
@@ -177,7 +194,7 @@ for nprobe_val in args.nprobes:
             full_dim_queries=queries_original_dim,
             original_dataset_path_str=str(dataset_path),
             final_k=actual_k_to_search,
-            nprobe_stage1=nprobe_val,
+            nprobe_stage1=nprobe,
             num_candidates_for_rerank=args.ncandidates_rerank,
             return_time=True,
         )
@@ -188,7 +205,7 @@ for nprobe_val in args.nprobes:
         (indices_tensor, distances_tensor), encqueriestime = lmi.search(
             full_dim_queries=queries_original_dim,
             k=actual_k_to_search,
-            nprobe=nprobe_val,
+            nprobe=nprobe,
             return_time=True,
         )
         D_results_np = distances_tensor.cpu().numpy()
@@ -196,7 +213,7 @@ for nprobe_val in args.nprobes:
 
     querytime = time.time() - search_start_time
     logger.success(
-        f"Search completed for nprobe={nprobe_val} in {querytime:.2f} seconds."
+        f"Search completed for nprobe={nprobe} in {querytime:.2f} seconds."
     )
 
     param_list = [
@@ -207,7 +224,7 @@ for nprobe_val in args.nprobes:
         f"sample={args.sample_size}",
         f"alpha={args.alpha}",
         f"build_chunk={args.chunk_size_build}",
-        f"nprobe={nprobe_val}",
+        f"nprobe={nprobe}",
         f"k={args.k}",
     ]
     if args.reduced_dim is not None:
@@ -235,5 +252,6 @@ for nprobe_val in args.nprobes:
         params=identifier_str,
         size=args.dataset_size,
     )
+
 
 logger.info("All tests finished.")
