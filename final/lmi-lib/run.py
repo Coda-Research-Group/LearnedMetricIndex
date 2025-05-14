@@ -76,7 +76,7 @@ parser.add_argument(
     "--reduced-dim",
     type=int,
     default=None,
-    help="Target dimensionality for TSVD. If None, original dimension is used. (Tasks 2 & 3)",
+    help="Target dimensionality for TSVD. If None, original dimension is used.",
 )
 
 parser.add_argument(
@@ -92,13 +92,13 @@ parser.add_argument(
 parser.add_argument(
     "--rerank",
     action="store_true",
-    help="Enable reranking with full-dimension vectors (Task 2).",
+    help="Enable reranking with full-dimension vectors",
 )
 parser.add_argument(
     "--ncandidates-rerank",
     type=int,
     default=1000,
-    help="Number of candidates from stage 1 to consider for reranking (Task 2).",
+    help="Number of candidates from stage 1 to consider for reranking",
 )
 
 args = parser.parse_args()
@@ -177,14 +177,13 @@ for nprobe in args.nprobes:
         (queries_original_dim.shape[0], actual_k_to_search), -1, dtype=np.int32
     )
 
-    # shape [n_queries, nprobe]
-    predicted_buckets = lmi._predict(queries_original_dim, nprobe).numpy().astype(np.int32)
-    print(predicted_buckets.shape)
-    # Calculate average number of objects that will be searched
-    print(f"{bucket_sizes[predicted_buckets].shape=}")
+    predicted_buckets = (
+        lmi._predict(queries_original_dim, nprobe).numpy().astype(np.int32)
+    )
     avg_n_objects = np.sum(np.mean(bucket_sizes[predicted_buckets], axis=0))
-    print(f"{avg_n_objects.shape=}")
-    logger.info(f"Average number of objects that will be searched: {avg_n_objects}")
+    logger.info(
+        f"Average number of vectors that will be searched per query: {avg_n_objects}"
+    )
 
     if args.rerank:
         logger.info(
@@ -198,8 +197,6 @@ for nprobe in args.nprobes:
             num_candidates_for_rerank=args.ncandidates_rerank,
             return_time=True,
         )
-        D_results_np = distances_tensor.cpu().numpy()
-        I_results_np = indices_tensor.cpu().numpy()
 
     else:
         (indices_tensor, distances_tensor), encqueriestime = lmi.search(
@@ -208,13 +205,12 @@ for nprobe in args.nprobes:
             nprobe=nprobe,
             return_time=True,
         )
-        D_results_np = distances_tensor.cpu().numpy()
-        I_results_np = indices_tensor.cpu().numpy()
+
+    D_results_np = distances_tensor.cpu().numpy()
+    I_results_np = indices_tensor.cpu().numpy()
 
     querytime = time.time() - search_start_time
-    logger.success(
-        f"Search completed for nprobe={nprobe} in {querytime:.2f} seconds."
-    )
+    logger.success(f"Search completed for nprobe={nprobe} in {querytime:.2f} seconds.")
 
     param_list = [
         f"task={args.task}",

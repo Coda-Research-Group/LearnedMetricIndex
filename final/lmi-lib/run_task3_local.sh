@@ -10,4 +10,4 @@ python run.py \
     --alpha 1.0 \
     --reduced-dim 240 \
     --k 30 \
-    --nprobes 1 \
+    --nprobes 1
