@@ -20,7 +20,7 @@ use serde_json;
 use rayon::prelude::*;
 
 pub mod helpers;
-use helpers::{dot_product, from_raw_ptr, k_largest_tuples, to_raw_ptr};
+use helpers::{dot_product, dot_product_f32_f16_avx2, from_raw_ptr, k_largest_tuples, to_raw_ptr};
 
 use half::f16;
 use hdf5::File;
@@ -509,15 +509,25 @@ impl RustLmi {
                             let end = start + vector_dim;
                             let bucket_vector = &bucket_slice[start..end];
 
-                            let bucket_vector_f32: Vec<f32> =
-                                bucket_vector.iter().map(|&h| h.to_f32()).collect();
+                            let similarity = if !is_x86_feature_detected!("f16c") {
+                                let bucket_vector_f32: Vec<f32> =
+                                    bucket_vector.iter().map(|&h| h.to_f32()).collect();
 
-                            let similarity = unsafe {
-                                dot_product(
-                                    query_slice.as_ptr(),
-                                    bucket_vector_f32.as_ptr(),
-                                    vector_dim,
-                                )
+                                unsafe {
+                                    dot_product(
+                                        query_slice.as_ptr(),
+                                        bucket_vector_f32.as_ptr(),
+                                        vector_dim,
+                                    )
+                                }
+                            } else {
+                                unsafe {
+                                    dot_product_f32_f16_avx2(
+                                        query_slice.as_ptr(),
+                                        bucket_vector.as_ptr(),
+                                        vector_dim,
+                                    )
+                                }
                             };
                             let data_id = bucket_data_ids_vec[i];
 

@@ -164,6 +164,36 @@ pub unsafe fn dot_product_avx512(v1: *const f32, v2: *const f32, dim: usize) -> 
     total
 }
 
+use half::f16;
+
+#[target_feature(enable = "avx2", enable="f16c")] // f16c for _mm256_cvtph_ps
+pub unsafe fn dot_product_f32_f16_avx2(v1_f32: *const f32, v2_f16: *const f16, dim: usize) -> f32 {
+    let mut sum_vec = _mm256_setzero_ps();
+    let mut i = 0;
+
+    // Process 8 f16 elements (which is 16 bytes) at a time to make one __m256 of f32
+    while i + 8 <= dim {
+        let q_chunk_f32 = _mm256_loadu_ps(v1_f32.add(i));
+        // Load 8 f16s (128 bits)
+        let d_chunk_f16_128 = _mm_loadu_si128(v2_f16.add(i) as *const __m128i);
+        // Convert 8 f16s to 8 f32s
+        let d_chunk_f32 = _mm256_cvtph_ps(d_chunk_f16_128); // Needs F16C instructions
+
+        let prod = _mm256_mul_ps(q_chunk_f32, d_chunk_f32);
+        sum_vec = _mm256_add_ps(sum_vec, prod);
+        i += 8;
+    }
+    let mut sum_array = [0f32; 8];
+    _mm256_storeu_ps(sum_array.as_mut_ptr(), sum_vec);
+    let mut total = sum_array.iter().sum();
+
+    while i < dim {
+        total += *v1_f32.add(i) * (*v2_f16.add(i)).to_f32();
+        i += 1;
+    }
+    total
+}
+
 pub unsafe fn dot_product(v1_ptr: *const f32, v2_ptr: *const f32, dim: usize) -> f32 {
     if is_x86_feature_detected!("avx512f") {
         dot_product_avx512(v1_ptr, v2_ptr, dim)
