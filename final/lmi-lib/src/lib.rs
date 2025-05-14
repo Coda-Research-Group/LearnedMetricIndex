@@ -92,11 +92,16 @@ impl LMI {
         });
     }
 
-    fn _create_buckets_scalable(&mut self, dataset_path: String, n_data: usize, chunk_size: usize) {
+    fn _create_buckets_scalable(
+        &mut self,
+        dataset_path: String,
+        n_data: usize,
+        chunk_size: usize,
+    ) -> f64 {
         Python::with_gil(|py| {
             py.allow_threads(|| {
                 self.rust_object
-                    .create_buckets_scalable(&dataset_path, n_data, chunk_size);
+                    .create_buckets_scalable(&dataset_path, n_data, chunk_size)
             })
         })
     }
@@ -105,31 +110,31 @@ impl LMI {
         PyTensor(self.rust_object.bucket_data[&bucket_id].shallow_clone())
     }
 
-    fn search(&self, query: PyTensor, k: i64) -> PyTensor {
-        PyTensor(self.rust_object.search(&query, k))
+    fn transform_tsvd(&self, X: PyTensor) -> PyTensor {
+        let raw_ptr = to_raw_ptr(&X);
+        let slf_ptr = to_raw_ptr(&self.rust_object);
+        Python::with_gil(|py| {
+            py.allow_threads(|| {
+                let X = from_raw_ptr::<Tensor>(raw_ptr);
+                let slf = from_raw_ptr::<RustLmi>(slf_ptr);
+                PyTensor(slf.transform_tsvd(X))
+            })
+        })
     }
 
-    fn search_multiple(&self, queries: PyTensor, k: i64) -> PyTensor {
-        PyTensor(self.rust_object.search_multiple(&queries, k))
-    }
-
-    fn search_raw(&self, query: PyTensor, k: i64) -> PyTensor {
-        PyTensor(self.rust_object.search_raw(&query, k))
-    }
-
-    fn search_raw_multiple(&self, queries: PyTensor, k: i64) -> PyTensor {
-        PyTensor(self.rust_object.search_raw_multiple(&queries, k))
-    }
-
-    fn search_raw_multiple_nprobe(
+    fn search(
         &self,
-        queries: PyTensor,
+        full_dim_queries: PyTensor,
         k: i64,
         nprobe: i64,
+        transformed_queries: Option<PyTensor>,
     ) -> (PyTensor, PyTensor) {
-        let result = self
-            .rust_object
-            .search_raw_multiple_nprobe(&queries, k, nprobe);
+        let result = self.rust_object.search(
+            &full_dim_queries,
+            k,
+            nprobe,
+            transformed_queries.as_ref().map(|t| &**t),
+        );
         (PyTensor(result.0), PyTensor(result.1))
     }
 
@@ -140,12 +145,16 @@ impl LMI {
         final_k: i64,
         nprobe_stage1: i64,
         num_candidates_for_rerank: i64,
-    ) -> PyResult<(PyTensor, PyTensor)> {
+        transformed_queries: Option<PyTensor>,
+    ) -> (PyTensor, PyTensor) {
         let raw_ptr = to_raw_ptr(&original_queries_f32);
         let slf_ptr = to_raw_ptr(&self.rust_object);
+        let transformed_queries_ptr = transformed_queries.as_ref().map(|t| to_raw_ptr(&t));
         let (indices, distances) = Python::with_gil(|py| {
             py.allow_threads(|| {
                 let original_queries_f32 = from_raw_ptr::<Tensor>(raw_ptr);
+                let transformed_queries =
+                    transformed_queries_ptr.map(|ptr| from_raw_ptr::<Tensor>(ptr));
                 let slf = from_raw_ptr::<RustLmi>(slf_ptr);
                 slf.search_with_reranking(
                     &original_queries_f32,
@@ -153,10 +162,11 @@ impl LMI {
                     final_k,
                     nprobe_stage1,
                     num_candidates_for_rerank,
+                    transformed_queries.as_ref().map(|t| &**t),
                 )
             })
         });
-        Ok((PyTensor(indices), PyTensor(distances)))
+        (PyTensor(indices), PyTensor(distances))
     }
 
     fn test_read_raw_tensor(&self) {

@@ -89,20 +89,21 @@ class LMI:
         """
         ...
 
-    def search(self, query: torch.Tensor, k: int) -> torch.Tensor: ...
-    def search_multiple(self, queries: torch.Tensor, k: int) -> torch.Tensor: ...
-    def search_raw(self, query: torch.Tensor, k: int) -> torch.Tensor: ...
-    def search_raw_multiple(self, queries: torch.Tensor, k: int) -> torch.Tensor: ...
-    def search_raw_multiple_nprobe(
-        self, queries: torch.Tensor, k: int, nprobe: int
+    def search(
+        self,
+        full_dim_queries: torch.Tensor,
+        k: int,
+        nprobe: int,
+        transformed_queries: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, torch.Tensor]: ...
     def search_with_reranking(
         self,
-        original_queries_f32: torch.Tensor,
+        full_dim_queries: torch.Tensor,
         original_dataset_path_str: str,
         final_k: int,
         nprobe_stage1: int,
         num_candidates_for_rerank: int,
+        transformed_queries: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, torch.Tensor]: ...
     @staticmethod
     def create(

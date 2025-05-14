@@ -1,0 +1,12 @@
+python run.py \
+    --task 1 \
+    --dataset-size "300K" \
+    --dataset-base-path "../../data2024/" \
+    --output-dir "results_rust" \
+    --epochs 15 \
+    --lr 0.00098 \
+    --sample-size 100000 \
+    --chunk-size-build 100000 \
+    --alpha 1.0 \
+    --k 30 \
+    --nprobes 1 \

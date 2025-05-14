@@ -17,4 +17,5 @@ __pycache__/
 test.ipynb
 
 result/
+results_rust/
 *.csv

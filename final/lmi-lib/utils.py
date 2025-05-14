@@ -39,6 +39,8 @@ def store_results(  # noqa: PLR0913
     algo: str,
     D: np.ndarray,
     I: np.ndarray,
+    kmeanstime: float,
+    trainmodeltime: float,
     modelingtime: float,
     encdatabasetime: float,
     encqueriestime: float,
@@ -50,6 +52,8 @@ def store_results(  # noqa: PLR0913
     Path.mkdir(dst.parent, parents=True, exist_ok=True)
     f = h5py.File(dst, 'w')
     f.attrs['algo'] = algo
+    f.attrs['kmeanstime'] = kmeanstime
+    f.attrs['trainmodeltime'] = trainmodeltime
     f.attrs['modelingtime'] = modelingtime
     f.attrs['encdatabasetime'] = encdatabasetime
     f.attrs['encqueriestime'] = encqueriestime

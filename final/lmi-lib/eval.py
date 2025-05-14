@@ -71,6 +71,8 @@ if __name__ == '__main__':
     columns = [
         'size',
         'algo',
+        'kmeanstime',
+        'trainmodeltime',
         'modelingtime',
         'encdatabasetime',
         'encqueriestime',
@@ -97,4 +99,5 @@ if __name__ == '__main__':
             recall = get_recall(np.array(res['knns']), true_I_cache[size], 30)
             d['recall'] = recall
             print(d['algo'], d['params'], '=>', recall)
+            print('\n')
             writer.writerow(d)

@@ -41,35 +41,72 @@ class LMI:
         return self._inner._create_buckets(X)
 
     @utils.measure_runtime
-    def _create_buckets_scalable(self, dataset: Path, n_data: int, chunk_size: int):
+    def _create_buckets_scalable(self, dataset: Path, n_data: int, chunk_size: int) -> float:
         return self._inner._create_buckets_scalable(dataset, n_data, chunk_size)
-
-    @utils.measure_runtime
-    def search_raw_multiple_nprobe(
-        self, queries: torch.Tensor, k: int, nprobe: int
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        return self._inner.search_raw_multiple_nprobe(queries, k, nprobe)
-
-    @utils.measure_runtime
-    def search_with_reranking(
-        self,
-        original_queries_f32: torch.Tensor,
-        original_dataset_path_str: str,
-        final_k: int,
-        nprobe_stage1: int,
-        num_candidates_for_rerank: int,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        return self._inner.search_with_reranking(
-            original_queries_f32,
-            original_dataset_path_str,
-            final_k,
-            nprobe_stage1,
-            num_candidates_for_rerank,
-        )
 
     @staticmethod
     def init_logging():
         LMIBase.init_logging()
+
+    def _encode(self, X: torch.Tensor) -> tuple[torch.Tensor, float]:
+        logger.info(
+            f"Reducing query dimensionality to {self._inner.dimensionality} using LMI's TSVD..."
+        )
+        query_encode_start_time = time.time()
+        transformed_queries = self._inner.transform_tsvd(X)
+        encqueriestime = time.time() - query_encode_start_time
+        logger.success(
+            f"Queries transformed to D={transformed_queries.shape[1]} in {encqueriestime:.2f}s."
+        )
+
+        return transformed_queries, encqueriestime
+
+    def search(
+        self,
+        full_dim_queries: torch.Tensor,
+        k: int,
+        nprobe: int,
+        return_time: bool = False,
+    ) -> (
+        tuple[torch.Tensor, torch.Tensor]
+        | tuple[tuple[torch.Tensor, torch.Tensor], float]
+    ):
+        transformed_queries, encqueriestime = None, 0.0
+        if self._inner.dimensionality != full_dim_queries.shape[1]:
+            transformed_queries, encqueriestime = self._encode(full_dim_queries)
+        result = self._inner.search(full_dim_queries, k, nprobe, transformed_queries)
+
+        if return_time:
+            return result, encqueriestime
+        return result
+
+    def search_with_reranking(
+        self,
+        full_dim_queries: torch.Tensor,
+        original_dataset_path_str: str,
+        final_k: int,
+        nprobe_stage1: int,
+        num_candidates_for_rerank: int,
+        return_time: bool = False,
+    ) -> (
+        tuple[torch.Tensor, torch.Tensor]
+        | tuple[tuple[torch.Tensor, torch.Tensor], float]
+    ):
+        transformed_queries, encqueriestime = None, 0.0
+        if self._inner.dimensionality != full_dim_queries.shape[1]:
+            transformed_queries, encqueriestime = self._encode(full_dim_queries)
+        result = self._inner.search_with_reranking(
+            full_dim_queries,
+            original_dataset_path_str,
+            final_k,
+            nprobe_stage1,
+            num_candidates_for_rerank,
+            transformed_queries,
+        )
+
+        if return_time:
+            return result, encqueriestime
+        return result
 
     @staticmethod
     def create(
@@ -82,44 +119,62 @@ class LMI:
         model: Optional[Sequential] = None,
         reduced_dim: Optional[int] = None,
         SEED: int = 42,
-    ) -> LMI:
-        logger.debug("Creating LMI instance...")
+        return_time: bool = False,
+    ) -> tuple[LMI, float, float]:
+        logger.debug("Creating LMI (Rust backend) instance...")
+        torch.manual_seed(SEED)
 
-        n_data, data_dim = utils.get_dataset_shape(dataset)
+        n_data, data_dim_original = utils.get_dataset_shape(dataset)
+
+        logger.info(f"Sampling training subset (sample_size={sample_size})...")
         X_train = utils.sample_train_subset(
-            dataset, n_data, data_dim, sample_size, chunk_size
+            dataset, n_data, data_dim_original, sample_size, chunk_size
         ).to(torch.float32)
+        logger.success(f"Training subset sampled: {X_train.shape}")
 
-        logger.debug(f"Training on {X_train.shape[0]} subset from {n_data} dataset")
-
-        y = LMI._run_kmeans(n_buckets, data_dim, X_train)
+        logger.info(f"Running K-Means (n_buckets={n_buckets})...")
+        start = time.time()
+        y_train = LMI._run_kmeans(n_buckets, data_dim_original, X_train)
+        kmeanstime = time.time() - start
+        logger.success(f"K-Means completed. Labels shape: {y_train.shape}")
 
         if model is None:
-            if reduced_dim is not None:
-                dim = reduced_dim
-            else:
-                dim = data_dim
-
+            logger.info(f"Defining default model for input dim: {data_dim_original}")
             model = Sequential(
-                Linear(dim, 512),
+                Linear(data_dim_original, 512),
                 ReLU(),
                 Linear(512, n_buckets),
             )
 
-        lmi = LMI(model, n_buckets, data_dim)
+        lmi = LMI(model, n_buckets, data_dim_original)
 
-        if reduced_dim is not None:
-            logger.debug(f"Fitting TSVD from {data_dim} to {reduced_dim} dimensions")
-            start = time.time()
+        logger.info(f"Training LMI model (epochs={epochs}, lr={lr})...")
+        start = time.time()
+        lmi._train_model(X_train, y_train, epochs, lr)
+        trainmodeltime = time.time() - start
+        logger.success(
+            f"LMI model training completed in {trainmodeltime:.2f} seconds."
+        )
+
+        modelingtime = 0.0
+        if reduced_dim is not None and reduced_dim > 0:
+            logger.info(
+                f"Fitting TSVD from {data_dim_original} to {reduced_dim} dimensions..."
+            )
+            modelingtime = time.time()
             lmi._fit_tsvd(X_train, reduced_dim)
-            fit_tsvd_time = time.time() - start
-            logger.debug(f"TSVD fitting time: {fit_tsvd_time:.2f} seconds")
+            modelingtime = time.time() - modelingtime
+            logger.success(
+                f"TSVD fitting completed in {modelingtime:.2f} seconds. New LMI dim: {lmi._inner.dimensionality}"
+            )
 
-        lmi._train_model(X_train, y, epochs, lr)
-
-        del X_train
+        del X_train, y_train
         gc.collect()
 
-        lmi._create_buckets_scalable(str(dataset), n_data, chunk_size)
+        logger.info("Creating LMI buckets by processing the full dataset...")
+        encdatabasetime = lmi._create_buckets_scalable(str(dataset), n_data, chunk_size)
+        logger.success(f"LMI buckets created.")
 
+        if return_time:
+            return lmi, kmeanstime, trainmodeltime, modelingtime, encdatabasetime
         return lmi

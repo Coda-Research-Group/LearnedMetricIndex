@@ -32,7 +32,7 @@ use tracing::{error, info, warn};
 
 use petal_decomposition::{RandomizedPca, RandomizedPcaBuilder};
 use rand_pcg::Mcg128Xsl64;
-
+use std::time::Instant;
 const SEED: i64 = 42;
 
 #[derive(Deserialize, Debug)]
@@ -145,15 +145,14 @@ impl RustLmi {
             .build();
 
         let kmeans = kmeans.kmeans_minibatch(
-            4096,
+            8192,
             n_buckets as usize,
             500,
             KMeans::init_random_sample,
             &conf,
         );
 
-        // let kmeans =
-        //     kmeans.kmeans_lloyd(n_buckets as usize, 500, KMeans::init_random_sample, &conf);
+        // let kmeans = kmeans.kmeans_lloyd(n_buckets as usize, 500, KMeans::init_random_sample, &conf);
 
         let assignments = kmeans
             .assignments
@@ -166,8 +165,6 @@ impl RustLmi {
 
     #[allow(unused_variables)]
     pub fn train_model(&mut self, X: &Tensor, y: &Tensor, epochs: i64, lr: f64) {
-        let X = self.transform_tsvd(X);
-
         let train_loader = Iter2::new(&X, &y, 256).collect::<Vec<_>>();
         let mut optimizer = nn::Adam::default().build(&self.vs, lr).unwrap();
 
@@ -272,12 +269,11 @@ impl RustLmi {
         dataset_path_str: &str,
         n_data: usize,
         chunk_size: usize,
-    ) {
+    ) -> f64 {
         let dataset_path = Path::new(dataset_path_str);
         let n_chunks = (n_data + chunk_size - 1) / chunk_size;
         let device = self.vs.device();
 
-        // --- Pass 1: Count items per bucket ---
         info!("Pass 1: Counting items per bucket (Serial)...");
         let mut total_counts = HashMap::<i64, usize>::new();
 
@@ -297,7 +293,6 @@ impl RustLmi {
                 continue;
             }
             let chunk_data_f32 = chunk_data_f16.to_kind(Kind::Float);
-            let chunk_data_f32 = self.transform_tsvd(&chunk_data_f32).to_kind(Kind::Float);
             let chunk_labels = no_grad(|| self.predict(&chunk_data_f32, 1).1.reshape([-1]));
 
             let labels_vec: Vec<i64> = chunk_labels.try_into().unwrap();
@@ -311,7 +306,6 @@ impl RustLmi {
         }
         info!("Pass 1: Counting complete.");
 
-        // --- Bucket Initialization ---
         info!("Initializing Bucket Storage (f16)...");
         self.bucket_data.clear();
         self.bucket_data_ids.clear();
@@ -338,7 +332,8 @@ impl RustLmi {
             current_write_idx.insert(bucket_id, 0);
         }
 
-        // --- Pass 2: Place data into buckets ---
+        let mut encdatabasetime = 0.0;
+
         info!("Pass 2: Placing data into buckets (Serial)...");
         for chunk_i in 0..n_chunks {
             let start = chunk_i * chunk_size;
@@ -355,10 +350,15 @@ impl RustLmi {
             if chunk_data_f16.size()[0] == 0 {
                 continue;
             }
-            let chunk_data_f32 = chunk_data_f16.to_kind(Kind::Float);
-            let chunk_data_f32 = self.transform_tsvd(&chunk_data_f32).to_kind(Kind::Float);
-            let chunk_data_f16 = chunk_data_f32.to_kind(Kind::Half);
+            let mut chunk_data_f32 = chunk_data_f16.to_kind(Kind::Float);
             let chunk_labels = no_grad(|| self.predict(&chunk_data_f32, 1).1.reshape([-1]));
+            if self.tsvd.is_some() {
+                let tsvd_time = Instant::now();
+                chunk_data_f32 = self.transform_tsvd(&chunk_data_f32).to_kind(Kind::Float);
+                let tsvd_time = tsvd_time.elapsed();
+                encdatabasetime += tsvd_time.as_secs_f64();
+            }
+            let chunk_data_f16 = chunk_data_f32.to_kind(Kind::Half);
             drop(chunk_data_f32);
             let labels_vec: Vec<i64> = chunk_labels.try_into().unwrap();
 
@@ -407,164 +407,28 @@ impl RustLmi {
         }
 
         info!("Serial bucket creation finished (f16).");
+        encdatabasetime
     }
 
-    #[allow(unused)]
-    pub fn search(&self, query: &Tensor, k: i64) -> Tensor {
-        let bucket_id = self.predict(query, 1).1.int64_value(&[]);
-        let bucket_data = self.bucket_data.get(&bucket_id).unwrap();
-        let bucket_data_ids = self.bucket_data_ids.get(&bucket_id).unwrap();
-
-        let similarities = bucket_data.matmul(&query.transpose(0, 1)).squeeze();
-
-        let k = k.min(similarities.size()[0] as i64);
-        let indices = similarities.sort(0, true).1.i((..k,));
-
-        bucket_data_ids.index(&[Some(indices)])
-    }
-
-    #[allow(unused)]
-    pub fn search_multiple(&self, queries: &Tensor, k: i64) -> Tensor {
-        let mut results = Vec::new();
-
-        for i in 0..queries.size()[0] {
-            let query = queries.i(i);
-            results.push(self.search(&query, k));
-        }
-
-        Tensor::cat(&results, 0)
-    }
-
-    #[allow(unused)]
-    pub fn search_raw(&self, query: &Tensor, k: i64) -> Tensor {
-        let bucket_id = self.predict(query, 1).1.int64_value(&[]);
-        let bucket_data = self.bucket_data.get(&bucket_id).unwrap();
-        let bucket_data_ids = self.bucket_data_ids.get(&bucket_id).unwrap();
-
-        let query_ptr: *const f32 = query.data_ptr() as *const f32;
-        let query_size = query.size()[1] as usize;
-        let query_slice = unsafe { std::slice::from_raw_parts(query_ptr, query_size) };
-
-        let bucket_data_ptr: *const f32 = bucket_data.data_ptr() as *const f32;
-        let num_vectors = bucket_data.size()[0] as usize;
-        let vector_dim = bucket_data.size()[1] as usize;
-
-        let bucket_slice =
-            unsafe { std::slice::from_raw_parts(bucket_data_ptr, num_vectors * vector_dim) };
-
-        let mut similarities = vec![(0.0, 0); num_vectors];
-
-        similarities
-            .par_iter_mut()
-            .enumerate()
-            .for_each(|(i, dist_item)| {
-                let start = i * vector_dim;
-                let end = start + vector_dim;
-                let bucket_vector = &bucket_slice[start..end];
-
-                *dist_item = (
-                    unsafe {
-                        dot_product(query_slice.as_ptr(), bucket_vector.as_ptr(), vector_dim)
-                    },
-                    i as i32,
-                );
-            });
-
-        let k = k.min(num_vectors as i64);
-        let pivot_index = num_vectors - k as usize;
-        similarities.select_nth_unstable_by(pivot_index, |a, b| a.0.partial_cmp(&b.0).unwrap());
-
-        let mut results = similarities[pivot_index..].to_vec();
-        results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
-        let indices = results.iter().map(|(_, i)| *i).collect::<Vec<i32>>();
-        let indices = Tensor::from_slice(&indices);
-
-        bucket_data_ids.index(&[Some(indices)])
-    }
-
-    pub fn search_raw_multiple(&self, queries: &Tensor, k: i64) -> Tensor {
-        let (_, bucket_ids) = self.predict(queries, 1);
-        let n_queries = queries.size()[0];
-
-        let mut all_results = Vec::with_capacity(n_queries as usize);
-
-        let queries_raw = to_raw_ptr(queries);
-        let bucket_ids_raw = to_raw_ptr(&bucket_ids);
-        let self_raw = to_raw_ptr(self);
-
-        (0..n_queries)
-            .into_par_iter()
-            .map(|i| {
-                let queries: &Tensor = from_raw_ptr(queries_raw);
-                let bucket_ids: &Tensor = from_raw_ptr(bucket_ids_raw);
-                let slf: &RustLmi = from_raw_ptr(self_raw);
-
-                let query = queries.get(i);
-                let bucket_id = bucket_ids.get(i).int64_value(&[]);
-
-                let bucket_data = slf.bucket_data.get(&bucket_id).unwrap();
-                let bucket_data_ids = slf.bucket_data_ids.get(&bucket_id).unwrap();
-
-                let query_ptr: *const f32 = query.data_ptr() as *const f32;
-                let query_size = query.size()[0] as usize;
-                let query_slice = unsafe { std::slice::from_raw_parts(query_ptr, query_size) };
-
-                let bucket_data_ptr: *const f32 = bucket_data.data_ptr() as *const f32;
-                let num_vectors = bucket_data.size()[0] as usize;
-                let vector_dim = bucket_data.size()[1] as usize;
-
-                let bucket_slice = unsafe {
-                    std::slice::from_raw_parts(bucket_data_ptr, num_vectors * vector_dim)
-                };
-
-                let mut similarities = vec![(0.0, 0); num_vectors];
-
-                for i in 0..num_vectors {
-                    let start = i * vector_dim;
-                    let end = start + vector_dim;
-                    let bucket_vector = &bucket_slice[start..end];
-
-                    similarities[i] = (
-                        unsafe {
-                            dot_product(query_slice.as_ptr(), bucket_vector.as_ptr(), vector_dim)
-                        },
-                        i as i32,
-                    );
-                }
-
-                let pivot_index = num_vectors - k.min(num_vectors as i64) as usize;
-                similarities
-                    .select_nth_unstable_by(pivot_index, |a, b| a.0.partial_cmp(&b.0).unwrap());
-
-                let mut results = similarities[pivot_index..].to_vec();
-                results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
-                let mut indices = results.iter().map(|(_, i)| *i).collect::<Vec<i32>>();
-
-                while indices.len() < k as usize {
-                    indices.push(0);
-                }
-
-                let indices = Tensor::from_slice(&indices);
-
-                bucket_data_ids.index(&[Some(indices)])
-            })
-            .collect::<Vec<Tensor>>()
-            .into_iter()
-            .enumerate()
-            .for_each(|(_, result)| {
-                all_results.push(result);
-            });
-
-        Tensor::stack(&all_results, 0)
-    }
-
-    pub fn search_raw_multiple_nprobe(
+    pub fn search(
         &self,
-        queries: &Tensor,
+        full_dim_queries: &Tensor,
         k: i64,
         nprobe: i64,
+        transformed_queries: Option<&Tensor>,
     ) -> (Tensor, Tensor) {
-        let queries = self.transform_tsvd(queries);
+        assert!(full_dim_queries.size()[1] == self.original_dimensionality);
+        if let Some(transformed_queries) = transformed_queries {
+            assert!(transformed_queries.size()[1] == self.dimensionality);
+            assert!(full_dim_queries.size()[0] == transformed_queries.size()[0]);
+        }
+
+        let queries = if let Some(transformed_queries) = transformed_queries {
+            transformed_queries.shallow_clone()
+        } else {
+            full_dim_queries.shallow_clone()
+        };
+
         let queries = if queries.kind() == Kind::Float {
             queries.shallow_clone()
         } else {
@@ -573,7 +437,7 @@ impl RustLmi {
 
         let device = queries.device();
 
-        let (_, bucket_ids_per_query) = self.predict(&queries, nprobe); // [n_queries, nprobe]
+        let (_, bucket_ids_per_query) = self.predict(&full_dim_queries, nprobe); // [n_queries, nprobe]
 
         let n_queries = queries.size()[0];
         let mut all_results: Vec<Tensor> = Vec::with_capacity(n_queries as usize);
@@ -683,7 +547,7 @@ impl RustLmi {
         }
     }
 
-    fn load_full_dim_vectors_from_hdf5(&self, dataset_path: &Path, ids_to_load: &[i64]) -> Tensor {
+    fn load_full_dim_vectors(&self, dataset_path: &Path, ids_to_load: &[i64]) -> Tensor {
         if !dataset_path.exists() {
             panic!("Original dataset file not found: {:?}", dataset_path);
         }
@@ -736,41 +600,43 @@ impl RustLmi {
 
     pub fn search_with_reranking(
         &self,
-        original_queries_f32: &Tensor,
+        full_dim_queries: &Tensor,
         original_dataset_path_str: &str,
         final_k: i64,
         nprobe_stage1: i64,
         num_candidates_for_rerank: i64,
+        transformed_queries: Option<&Tensor>,
     ) -> (Tensor, Tensor) {
         let original_dataset_path = Path::new(original_dataset_path_str);
-        if original_queries_f32.kind() != Kind::Float {
+        if full_dim_queries.kind() != Kind::Float {
             panic!("Original queries must be Float32 for reranking.");
         }
-        if original_queries_f32.size().len() != 2
-            || original_queries_f32.size()[1] != self.original_dimensionality
+        if full_dim_queries.size().len() != 2
+            || full_dim_queries.size()[1] != self.original_dimensionality
         {
             panic!(
                 "Dimension mismatch for original queries in reranking. Expected: [{}, {}], Got: {:?}",
-                original_queries_f32.size()[0],
+                full_dim_queries.size()[0],
                 self.original_dimensionality,
-                original_queries_f32.size()
+                full_dim_queries.size()
             );
         }
 
-        let device = original_queries_f32.device();
+        let device = full_dim_queries.device();
 
         info!(
             "Reranking Stage 1: Fetching up to {} candidates using nprobe={}",
             num_candidates_for_rerank, nprobe_stage1
         );
         // Stage 1: Get approximate candidates using the LMI (reduced dim search)
-        let (candidate_indices_batch, _approx_distances_stage1) = self.search_raw_multiple_nprobe(
-            original_queries_f32,
+        let (candidate_indices_batch, _approx_distances_stage1) = self.search(
+            full_dim_queries,
             num_candidates_for_rerank,
             nprobe_stage1,
+            transformed_queries,
         );
 
-        let n_queries = original_queries_f32.size()[0];
+        let n_queries = full_dim_queries.size()[0];
 
         if n_queries == 0 {
             return (
@@ -780,7 +646,7 @@ impl RustLmi {
         }
 
         // --- Stage 2a: Collect all unique, valid candidate IDs across all queries ---
-        let mut unique_candidate_ids_set = HashSet::<i64>::new();
+        let mut unique_candidates = HashSet::<i64>::new();
         for i in 0..n_queries {
             let query_candidate_ids_tensor = candidate_indices_batch.i(i);
             let query_candidate_ids_vec: Vec<i64> = query_candidate_ids_tensor
@@ -795,13 +661,13 @@ impl RustLmi {
                 });
             for &id in &query_candidate_ids_vec {
                 if id >= 0 {
-                    unique_candidate_ids_set.insert(id);
+                    unique_candidates.insert(id);
                 }
             }
         }
-        let all_unique_ids_to_load_vec: Vec<i64> = unique_candidate_ids_set.into_iter().collect();
+        let unique_ids: Vec<i64> = unique_candidates.into_iter().collect();
 
-        if all_unique_ids_to_load_vec.is_empty() {
+        if unique_ids.is_empty() {
             info!("No valid candidates found across all queries after stage 1 for reranking.");
             let mut all_final_indices_list: Vec<Tensor> = Vec::with_capacity(n_queries as usize);
             let mut all_final_distances_list: Vec<Tensor> = Vec::with_capacity(n_queries as usize);
@@ -822,18 +688,15 @@ impl RustLmi {
         // --- Stage 2b: Load all unique full-dim vectors ONCE ---
         info!(
             "Reranking Stage 2: Loading {} unique full-dimension vectors from HDF5...",
-            all_unique_ids_to_load_vec.len()
+            unique_ids.len()
         );
-        // Vectors are loaded onto CPU by load_full_dim_vectors_from_hdf5
-        let all_loaded_full_dim_vectors_cpu = self
-            .load_full_dim_vectors_from_hdf5(original_dataset_path, &all_unique_ids_to_load_vec);
+        let loaded_full_dim_vecs = self.load_full_dim_vectors(original_dataset_path, &unique_ids);
         info!(
             "Reranking Stage 2: Loaded full-dim vectors. Tensor shape: {:?}",
-            all_loaded_full_dim_vectors_cpu.size(),
+            loaded_full_dim_vecs.size(),
         );
 
-        // Create a map from original ID to its row index in all_loaded_full_dim_vectors_cpu
-        let id_to_tensor_row_map: HashMap<i64, i64> = all_unique_ids_to_load_vec
+        let id_to_tensor_row_map: HashMap<i64, i64> = unique_ids
             .iter()
             .enumerate()
             .map(|(idx, &id)| (id, idx as i64))
@@ -845,9 +708,9 @@ impl RustLmi {
             n_queries
         );
 
-        let original_queries_f32_raw = to_raw_ptr(original_queries_f32);
+        let original_queries_f32_raw = to_raw_ptr(full_dim_queries);
         let candidate_indices_batch_raw = to_raw_ptr(&candidate_indices_batch);
-        let all_loaded_full_dim_vectors_cpu_raw = to_raw_ptr(&all_loaded_full_dim_vectors_cpu);
+        let all_loaded_full_dim_vectors_cpu_raw = to_raw_ptr(&loaded_full_dim_vecs);
         let id_to_tensor_row_map_raw = to_raw_ptr(&id_to_tensor_row_map);
 
         let par_results: Vec<(Vec<f32>, Vec<i64>)> = (0..n_queries)
