@@ -46,6 +46,7 @@ def store_results(  # noqa: PLR0913
     encqueriestime: float,
     buildtime: float,
     querytime: float,
+    nvectors: float,
     params: str,
     size: str,
 ) -> None:
@@ -59,6 +60,7 @@ def store_results(  # noqa: PLR0913
     f.attrs['encqueriestime'] = encqueriestime
     f.attrs['buildtime'] = buildtime
     f.attrs['querytime'] = querytime
+    f.attrs['nvectors'] = nvectors
     f.attrs['size'] = size
     f.attrs['params'] = params
     f.create_dataset('knns', I.shape, dtype=I.dtype)[:] = I

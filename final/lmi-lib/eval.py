@@ -78,6 +78,7 @@ if __name__ == '__main__':
         'encqueriestime',
         'buildtime',
         'querytime',
+        'nvectors',
         'params',
         'recall',
     ]

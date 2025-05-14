@@ -180,9 +180,9 @@ for nprobe in args.nprobes:
     predicted_buckets = (
         lmi._predict(queries_original_dim, nprobe).numpy().astype(np.int32)
     )
-    avg_n_objects = np.sum(np.mean(bucket_sizes[predicted_buckets], axis=0))
+    nvectors = np.sum(np.mean(bucket_sizes[predicted_buckets], axis=0))
     logger.info(
-        f"Average number of vectors that will be searched per query: {avg_n_objects}"
+        f"Average number of vectors that will be searched per query: {nvectors}"
     )
 
     if args.rerank:
@@ -245,6 +245,7 @@ for nprobe in args.nprobes:
         encqueriestime=encqueriestime,
         buildtime=buildtime,
         querytime=querytime,
+        nvectors=nvectors,
         params=identifier_str,
         size=args.dataset_size,
     )
