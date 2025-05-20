@@ -155,14 +155,6 @@ impl RustLmi {
             .random_generator(rnd)
             .build();
 
-        // let kmeans = kmeans.kmeans_minibatch(
-        //     8192,
-        //     n_buckets as usize,
-        //     500,
-        //     KMeans::init_random_sample,
-        //     &conf,
-        // );
-
         let kmeans = kmeans.kmeans_lloyd(n_buckets as usize, 25, KMeans::init_random_sample, &conf);
 
         let assignments = kmeans
@@ -249,7 +241,6 @@ impl RustLmi {
                         i % n_features,
                         val
                     );
-                    // Consider panicking here for debugging or handling it
                 }
             }
 
@@ -572,7 +563,6 @@ impl RustLmi {
         original_dim: i64,
         target_device: Device,
     ) -> (Tensor, Vec<i64>) {
-        // (Tensor_data_f16_on_target_device, Vec<original_ids_actually_loaded>)
         if candidate_original_ids.is_empty() {
             return (
                 Tensor::empty(&[0, original_dim], (Kind::Half, target_device)),
@@ -589,10 +579,6 @@ impl RustLmi {
             Vec::with_capacity(candidate_original_ids.len());
 
         for &idx in candidate_original_ids {
-            if idx < 0 {
-                continue;
-            } // Silently skip invalid negative indices
-
             let row_data_ndarray: ndarray::Array1<f16> =
                 dataset_hdf5.read_slice_1d(s![idx as usize, ..]).unwrap();
             let slice = row_data_ndarray.as_slice().unwrap();
