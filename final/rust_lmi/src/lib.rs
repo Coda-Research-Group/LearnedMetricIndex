@@ -3,7 +3,7 @@
 #![feature(stdarch_x86_avx512)]
 #![feature(avx512_target_feature)]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use tch::data::Iter2;
 use tch::kind::Kind;
 use tch::nn::{self, Module, OptimizerConfig, Sequential};
@@ -17,8 +17,6 @@ use serde::Deserialize;
 
 use serde_json;
 
-use rayon::prelude::*;
-
 pub mod helpers;
 use helpers::{dot_product, dot_product_f32_f16_avx2, from_raw_ptr, k_largest_tuples, to_raw_ptr};
 
@@ -26,13 +24,15 @@ use half::f16;
 use hdf5::File;
 use ndarray::Array2;
 use ndarray::s;
+use rayon::prelude::*;
 use std::path::Path;
-use tracing::{error, info, warn};
+use std::sync::Arc;
+use tracing::{error, info};
 
 use petal_decomposition::{RandomizedPca, RandomizedPcaBuilder};
 use rand_pcg::Mcg128Xsl64;
-use std::time::Instant;
 use std::io::Write;
+use std::time::Instant;
 const SEED: i64 = 42;
 
 #[derive(Deserialize, Debug)]
@@ -155,15 +155,15 @@ impl RustLmi {
             .random_generator(rnd)
             .build();
 
-        let kmeans = kmeans.kmeans_minibatch(
-            8192,
-            n_buckets as usize,
-            500,
-            KMeans::init_random_sample,
-            &conf,
-        );
+        // let kmeans = kmeans.kmeans_minibatch(
+        //     8192,
+        //     n_buckets as usize,
+        //     500,
+        //     KMeans::init_random_sample,
+        //     &conf,
+        // );
 
-        // let kmeans = kmeans.kmeans_lloyd(n_buckets as usize, 500, KMeans::init_random_sample, &conf);
+        let kmeans = kmeans.kmeans_lloyd(n_buckets as usize, 25, KMeans::init_random_sample, &conf);
 
         let assignments = kmeans
             .assignments
@@ -565,241 +565,248 @@ impl RustLmi {
         }
     }
 
-    fn load_full_dim_vectors(&self, dataset_path: &Path, ids_to_load: &[i64]) -> Tensor {
-        if !dataset_path.exists() {
-            panic!("Original dataset file not found: {:?}", dataset_path);
-        }
-        if ids_to_load.is_empty() {
-            return Tensor::empty(
-                &[0, self.original_dimensionality],
-                (Kind::Float, Device::Cpu),
+    fn load_vectors_for_rerank_hdf5(
+        &self,
+        dataset_path: &Path,
+        candidate_original_ids: &[i64],
+        original_dim: i64,
+        target_device: Device,
+    ) -> (Tensor, Vec<i64>) {
+        // (Tensor_data_f16_on_target_device, Vec<original_ids_actually_loaded>)
+        if candidate_original_ids.is_empty() {
+            return (
+                Tensor::empty(&[0, original_dim], (Kind::Half, target_device)),
+                Vec::new(),
             );
         }
 
-        let file = File::open(dataset_path).unwrap();
-        let dataset = file.dataset("emb").unwrap();
-        let hdf5_total_rows = dataset.shape()[0];
-        let hdf5_dim = dataset.shape()[1] as i64;
-        if hdf5_dim != self.original_dimensionality {
-            warn!(
-                "Mismatch: LMI original_dim {}, HDF5 dataset dim {}. Using HDF5 dim.",
-                self.original_dimensionality, hdf5_dim
-            );
-        }
-        let actual_dim_to_use = hdf5_dim;
-        let mut loaded_vectors_f32: Vec<f32> = Vec::new();
-        let mut actual_loaded_count = 0;
+        let file = hdf5::File::open(dataset_path).unwrap();
+        let dataset_hdf5 = file.dataset("emb").unwrap();
 
-        // info!("Loading full-dim vectors from HDF5...");
-        for &id_val in ids_to_load {
-            // info!("Loading vector for ID: {}", id_val);
-            if id_val < 0 || id_val >= hdf5_total_rows as i64 {
-                warn!(
-                    "ID {} out of bounds for HDF5 (size {}). Skipping.",
-                    id_val, hdf5_total_rows
-                );
+        let mut loaded_vectors_data_f16: Vec<f16> =
+            Vec::with_capacity(candidate_original_ids.len() * original_dim as usize);
+        let mut successfully_loaded_original_ids: Vec<i64> =
+            Vec::with_capacity(candidate_original_ids.len());
+
+        for &idx in candidate_original_ids {
+            if idx < 0 {
                 continue;
-            }
-            let row_f16_ndarray: ndarray::Array1<f16> =
-                dataset.read_slice_1d(s![id_val as usize, ..]).unwrap();
-            for &val_f16 in row_f16_ndarray.iter() {
-                loaded_vectors_f32.push(val_f16.to_f32());
-            }
-            actual_loaded_count += 1;
+            } // Silently skip invalid negative indices
+
+            let row_data_ndarray: ndarray::Array1<f16> =
+                dataset_hdf5.read_slice_1d(s![idx as usize, ..]).unwrap();
+            let slice = row_data_ndarray.as_slice().unwrap();
+
+            loaded_vectors_data_f16.extend_from_slice(slice);
+            successfully_loaded_original_ids.push(idx);
         }
-        // info!("Loaded {} vectors.", actual_loaded_count);
-        if actual_loaded_count == 0 {
-            return Tensor::empty(&[0, actual_dim_to_use], (Kind::Float, Device::Cpu));
+
+        let num_successfully_loaded = successfully_loaded_original_ids.len();
+
+        if num_successfully_loaded == 0 && !candidate_original_ids.is_empty() {
+            return (
+                Tensor::empty(&[0, original_dim], (Kind::Half, target_device)),
+                Vec::new(),
+            );
         }
-        Tensor::from_slice(&loaded_vectors_f32)
-            .reshape(&[actual_loaded_count, actual_dim_to_use])
-            .to_kind(Kind::Float)
+
+        let tensor_data = Tensor::from_slice(&loaded_vectors_data_f16)
+            .reshape(&[num_successfully_loaded as i64, original_dim])
+            .to_kind(Kind::Half)
+            .to(target_device);
+
+        (tensor_data, successfully_loaded_original_ids)
     }
 
     pub fn search_with_reranking(
         &self,
-        full_dim_queries: &Tensor,
+        original_queries_f32: &Tensor,
         original_dataset_path_str: &str,
         final_k: i64,
         nprobe_stage1: i64,
         num_candidates_for_rerank: i64,
-        transformed_queries: Option<&Tensor>,
+        transformed_queries_f32: Option<&Tensor>,
     ) -> (Tensor, Tensor) {
-        let original_dataset_path = Path::new(original_dataset_path_str);
-        if full_dim_queries.kind() != Kind::Float {
-            panic!("Original queries must be Float32 for reranking.");
+        // (final_indices, final_distances)
+        let device = self.vs.device();
+        assert_eq!(original_queries_f32.device(), device);
+        if let Some(tq) = transformed_queries_f32 {
+            assert_eq!(tq.device(), device);
         }
-        if full_dim_queries.size().len() != 2
-            || full_dim_queries.size()[1] != self.original_dimensionality
-        {
-            panic!(
-                "Dimension mismatch for original queries in reranking. Expected: [{}, {}], Got: {:?}",
-                full_dim_queries.size()[0],
-                self.original_dimensionality,
-                full_dim_queries.size()
-            );
-        }
-
-        let device = full_dim_queries.device();
-
-        info!(
-            "Reranking Stage 1: Fetching up to {} candidates using nprobe={}",
-            num_candidates_for_rerank, nprobe_stage1
-        );
-        // Stage 1: Get approximate candidates using the LMI (reduced dim search)
-        let (candidate_indices_batch, _approx_distances_stage1) = self.search(
-            full_dim_queries,
-            num_candidates_for_rerank,
-            nprobe_stage1,
-            transformed_queries,
+        assert_eq!(
+            self.original_dimensionality,
+            original_queries_f32.size()[1],
+            "Original query dim ({}) does not match LMI original dim ({}).",
+            original_queries_f32.size()[1],
+            self.original_dimensionality
         );
 
-        let n_queries = full_dim_queries.size()[0];
-
-        if n_queries == 0 {
-            return (
-                Tensor::empty(&[0, final_k], (Kind::Int64, device)),
-                Tensor::empty(&[0, final_k], (Kind::Float, device)),
-            );
-        }
-
-        info!("Reranking Stage 2: Collecting unique candidates...");
-        let mut unique_candidates = HashSet::<i64>::new();
-        for i in 0..n_queries {
-            let query_candidate_ids_tensor = candidate_indices_batch.i(i);
-            let query_candidate_ids_vec: Vec<i64> = query_candidate_ids_tensor
-                .to(tch::Device::Cpu)
-                .try_into()
-                .unwrap_or_else(|e| {
-                    warn!(
-                        "Failed to convert candidate IDs tensor to Vec<i64> for query {}: {:?}",
-                        i, e
-                    );
-                    vec![]
-                });
-            for &id in &query_candidate_ids_vec {
-                if id >= 0 {
-                    unique_candidates.insert(id);
-                }
+        let stage1_dot_product_queries_f32 = match transformed_queries_f32 {
+            Some(tq) if self.tsvd.is_some() && tq.size()[1] == self.dimensionality => tq,
+            _ if !self.tsvd.is_some() && original_queries_f32.size()[1] == self.dimensionality => {
+                original_queries_f32
             }
-        }
-        let unique_ids: Vec<i64> = unique_candidates.into_iter().collect();
-
-        if unique_ids.is_empty() {
-            info!("No valid candidates found across all queries after stage 1 for reranking.");
-            let mut all_final_indices_list: Vec<Tensor> = Vec::with_capacity(n_queries as usize);
-            let mut all_final_distances_list: Vec<Tensor> = Vec::with_capacity(n_queries as usize);
-            for _ in 0..n_queries {
-                all_final_indices_list.push(Tensor::full(&[final_k], -1i64, (Kind::Int64, device)));
-                all_final_distances_list.push(Tensor::full(
-                    &[final_k],
-                    std::f64::NEG_INFINITY,
-                    (Kind::Float, device),
-                ));
+            _ => {
+                panic!(
+                    "Mismatch in query dimensionality for Stage 1. LMI reduced dim: {}. Provided transformed_query_dim: {}, original_query_dim: {}. SVD active: {}",
+                    self.dimensionality,
+                    transformed_queries_f32.map_or(-1, |t| t.size()[1]),
+                    original_queries_f32.size()[1],
+                    self.tsvd.is_some()
+                );
             }
-            return (
-                Tensor::stack(&all_final_indices_list, 0),
-                Tensor::stack(&all_final_distances_list, 0),
-            );
-        }
+        };
 
-        // --- Stage 2b: Load all unique full-dim vectors ONCE ---
-        info!(
-            "Reranking Stage 2: Loading {} unique full-dimension vectors from HDF5...",
-            unique_ids.len()
-        );
-        let loaded_full_dim_vecs = self.load_full_dim_vectors(original_dataset_path, &unique_ids);
-        info!(
-            "Reranking Stage 2: Loaded full-dim vectors. Tensor shape: {:?}",
-            loaded_full_dim_vecs.size(),
-        );
+        let (_, bucket_ids_per_query_stage1) = self.predict(original_queries_f32, nprobe_stage1);
+        let n_queries = original_queries_f32.size()[0];
+        let arc_original_dataset_path = Arc::new(original_dataset_path_str.to_string());
 
-        let id_to_tensor_row_map: HashMap<i64, i64> = unique_ids
-            .iter()
-            .enumerate()
-            .map(|(idx, &id)| (id, idx as i64))
-            .collect();
+        let original_queries_f32_raw = to_raw_ptr(original_queries_f32);
+        let stage_1_dot_product_queries_f32_raw = to_raw_ptr(stage1_dot_product_queries_f32);
+        let bucket_ids_per_query_stage1_raw = to_raw_ptr(&bucket_ids_per_query_stage1);
+        let self_raw = to_raw_ptr(self);
 
-        // --- Stage 2c: Parallel Reranking using pre-loaded vectors ---
-        info!(
-            "Reranking Stage 2: Starting parallel reranking for {} queries.",
-            n_queries
-        );
-
-        let original_queries_f32_raw = to_raw_ptr(full_dim_queries);
-        let candidate_indices_batch_raw = to_raw_ptr(&candidate_indices_batch);
-        let all_loaded_full_dim_vectors_cpu_raw = to_raw_ptr(&loaded_full_dim_vecs);
-        let id_to_tensor_row_map_raw = to_raw_ptr(&id_to_tensor_row_map);
-
-        let par_results: Vec<(Vec<f32>, Vec<i64>)> = (0..n_queries)
+        let par_results: Vec<(Vec<f32>, Vec<i64>)> = (0..n_queries as usize)
             .into_par_iter()
-            .map(|query_idx| {
+            .map(|query_idx_usize| {
                 let original_queries_f32: &Tensor = from_raw_ptr(original_queries_f32_raw);
-                let candidate_indices_batch: &Tensor = from_raw_ptr(candidate_indices_batch_raw);
-                let all_loaded_full_dim_vectors_cpu: &Tensor =
-                    from_raw_ptr(all_loaded_full_dim_vectors_cpu_raw);
-                let id_to_tensor_row_map: &HashMap<i64, i64> =
-                    from_raw_ptr(id_to_tensor_row_map_raw);
+                let stage1_dot_product_queries_f32: &Tensor =
+                    from_raw_ptr(stage_1_dot_product_queries_f32_raw);
+                let bucket_ids_per_query_stage1: &Tensor =
+                    from_raw_ptr(bucket_ids_per_query_stage1_raw);
+                let slf: &RustLmi = from_raw_ptr(self_raw);
 
-                let current_original_query_f32_cpu =
-                    original_queries_f32.i(query_idx).to(tch::Device::Cpu);
+                let current_stage1_query_f32 =
+                    stage1_dot_product_queries_f32.get(query_idx_usize as i64);
+                let query_f32_ptr: *const f32 = current_stage1_query_f32.data_ptr() as *const f32;
+                let reduced_dim_usize = slf.dimensionality as usize;
 
-                let query_candidate_ids_tensor = candidate_indices_batch.i(query_idx);
-                let query_candidate_ids_vec: Vec<i64> = query_candidate_ids_tensor
-                    .to(tch::Device::Cpu)
-                    .try_into()
-                    .unwrap_or_else(|_| vec![]);
+                let nprobe_bucket_ids_tensor =
+                    bucket_ids_per_query_stage1.get(query_idx_usize as i64);
+                let nprobe_bucket_ids: Vec<i64> =
+                    nprobe_bucket_ids_tensor.to(Device::Cpu).try_into().unwrap();
 
-                let mut reranked_similarities: Vec<(f32, i64)> = Vec::new();
-
-                let query_ptr_f32 = current_original_query_f32_cpu.data_ptr() as *const f32;
-                let query_dim_usize = current_original_query_f32_cpu.numel() as usize;
-
-                for &original_candidate_id in &query_candidate_ids_vec {
-                    if original_candidate_id < 0 {
+                let mut stage1_similarities: Vec<(f32, i64)> = Vec::new();
+                for bucket_id64 in nprobe_bucket_ids {
+                    let bucket_idx = bucket_id64 as usize;
+                    if bucket_idx >= slf.bucket_data.len()
+                        || slf.bucket_data[bucket_idx].numel() == 0
+                    {
                         continue;
                     }
+                    let current_bucket_data_f16 = &slf.bucket_data[bucket_idx];
+                    let current_bucket_data_ids_i64 = &slf.bucket_data_ids[bucket_idx];
+                    let num_vectors_in_bucket = current_bucket_data_f16.size()[0];
+                    let bucket_f16_data_ptr: *const f16 =
+                        current_bucket_data_f16.data_ptr() as *const f16;
+                    let original_ids_vec: Vec<i64> = current_bucket_data_ids_i64
+                        .to(Device::Cpu)
+                        .try_into()
+                        .unwrap();
 
-                    if let Some(&tensor_row_idx) = id_to_tensor_row_map.get(&original_candidate_id)
-                    {
-                        let full_dim_vector_for_rerank =
-                            all_loaded_full_dim_vectors_cpu.i(tensor_row_idx);
-                        let cand_vec_ptr = full_dim_vector_for_rerank.data_ptr() as *const f32;
-
-                        let score =
-                            unsafe { dot_product(query_ptr_f32, cand_vec_ptr, query_dim_usize) };
-                        reranked_similarities.push((score, original_candidate_id));
+                    for i in 0..num_vectors_in_bucket as usize {
+                        let vector_f16_ptr =
+                            unsafe { bucket_f16_data_ptr.add(i * reduced_dim_usize) };
+                        let similarity = unsafe {
+                            dot_product_f32_f16_avx2(
+                                query_f32_ptr,
+                                vector_f16_ptr,
+                                reduced_dim_usize,
+                            )
+                        };
+                        if i < original_ids_vec.len() {
+                            stage1_similarities.push((similarity, original_ids_vec[i]));
+                        }
                     }
                 }
 
-                let top_k_reranked_tuples =
-                    k_largest_tuples(reranked_similarities, final_k as usize);
-                let mut final_distances: Vec<f32> =
-                    top_k_reranked_tuples.iter().map(|(d, _)| *d).collect();
-                let mut final_indices: Vec<i64> =
-                    top_k_reranked_tuples.iter().map(|(_, id)| *id).collect();
+                let top_stage1_tuples =
+                    k_largest_tuples(stage1_similarities, num_candidates_for_rerank as usize);
+                let candidate_original_ids_for_this_query: Vec<i64> = top_stage1_tuples
+                    .into_iter()
+                    .map(|(_, id)| id)
+                    .filter(|&id| id != -1)
+                    .collect();
 
-                while final_indices.len() < final_k as usize {
-                    final_indices.push(-1i64);
-                    final_distances.push(std::f32::NEG_INFINITY);
+                let make_default_result = || {
+                    let padding_dists = vec![std::f32::NEG_INFINITY; final_k as usize];
+                    let padding_ids = vec![-1i64; final_k as usize];
+                    (padding_dists, padding_ids)
+                };
+
+                if candidate_original_ids_for_this_query.is_empty() {
+                    return make_default_result();
                 }
-                (final_distances, final_indices)
+
+                let (loaded_full_dim_f16_this_query, loaded_original_ids_ordered) = slf
+                    .load_vectors_for_rerank_hdf5(
+                        Path::new(&*arc_original_dataset_path),
+                        &candidate_original_ids_for_this_query,
+                        slf.original_dimensionality,
+                        device,
+                    );
+
+                if loaded_full_dim_f16_this_query.numel() == 0 {
+                    return make_default_result();
+                }
+
+                let current_original_query_f32 = original_queries_f32.get(query_idx_usize as i64);
+                let original_query_f32_ptr: *const f32 =
+                    current_original_query_f32.data_ptr() as *const f32;
+                let original_dim_usize = slf.original_dimensionality as usize;
+
+                let num_rerank_candidates_actually_loaded =
+                    loaded_full_dim_f16_this_query.size()[0] as usize;
+                let rerank_candidates_f16_ptr: *const f16 =
+                    loaded_full_dim_f16_this_query.data_ptr() as *const f16;
+
+                let mut reranked_similarities: Vec<(f32, i64)> =
+                    Vec::with_capacity(num_rerank_candidates_actually_loaded);
+
+                for i in 0..num_rerank_candidates_actually_loaded {
+                    let candidate_f16_vector_ptr =
+                        unsafe { rerank_candidates_f16_ptr.add(i * original_dim_usize) };
+                    let similarity = unsafe {
+                        dot_product_f32_f16_avx2(
+                            original_query_f32_ptr,
+                            candidate_f16_vector_ptr,
+                            original_dim_usize,
+                        )
+                    };
+                    reranked_similarities.push((similarity, loaded_original_ids_ordered[i]));
+                }
+
+                let final_top_k_tuples = k_largest_tuples(reranked_similarities, final_k as usize);
+                let mut dists: Vec<f32> = final_top_k_tuples.iter().map(|(d, _)| *d).collect();
+                let mut ids: Vec<i64> = final_top_k_tuples.iter().map(|(_, id)| *id).collect();
+
+                while dists.len() < final_k as usize {
+                    dists.push(std::f32::NEG_INFINITY);
+                    ids.push(-1i64);
+                }
+                (dists, ids)
             })
             .collect();
 
-        // --- Collate results ---
-        let mut all_final_indices_list: Vec<Tensor> = Vec::with_capacity(n_queries as usize);
-        let mut all_final_distances_list: Vec<Tensor> = Vec::with_capacity(n_queries as usize);
+        let mut all_final_D_tensors: Vec<Tensor> = Vec::with_capacity(n_queries as usize);
+        let mut all_final_I_tensors: Vec<Tensor> = Vec::with_capacity(n_queries as usize);
 
-        for (distances_vec, indices_vec) in par_results {
-            all_final_indices_list.push(Tensor::from_slice(&indices_vec).to(device));
-            all_final_distances_list.push(Tensor::from_slice(&distances_vec).to(device));
+        for (dists_vec, ids_vec) in par_results {
+            all_final_D_tensors.push(Tensor::from_slice(&dists_vec).to(device));
+            all_final_I_tensors.push(Tensor::from_slice(&ids_vec).to(device));
         }
 
-        let final_indices_tensor = Tensor::stack(&all_final_indices_list, 0);
-        let final_distances_tensor = Tensor::stack(&all_final_distances_list, 0);
-
-        (final_indices_tensor, final_distances_tensor)
+        if n_queries == 0 {
+            (
+                Tensor::empty(&[0, final_k], (Kind::Int64, device)),
+                Tensor::empty(&[0, final_k], (Kind::Float, device)),
+            )
+        } else {
+            (
+                Tensor::stack(&all_final_I_tensors, 0),
+                Tensor::stack(&all_final_D_tensors, 0),
+            )
+        }
     }
 
     pub fn predict(&self, X: &Tensor, top_k: i64) -> (Tensor, Tensor) {

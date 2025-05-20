@@ -1,8 +1,17 @@
 from __future__ import annotations
 
+import os
+import torch
+
+# Set the LD_LIBRARY_PATH dynamically
+libtorch_path = os.path.join(torch.__path__[0], 'lib')
+if libtorch_path not in os.environ.get('LD_LIBRARY_PATH', ''):
+    os.environ['LD_LIBRARY_PATH'] = libtorch_path + ":" + os.environ.get('LD_LIBRARY_PATH', '')
+
+
 from .lmi import LMI as LMIBase
 from .helpers import extract_model_config
-import utils
+from .utils import measure_runtime, get_dataset_shape, sample_train_subset
 
 import torch
 from torch.nn import Sequential, Linear, ReLU
@@ -11,12 +20,7 @@ import gc
 from pathlib import Path
 from typing import Optional
 from loguru import logger
-
-from sklearn.decomposition import TruncatedSVD
 import time
-import h5py
-import faiss
-
 
 class LMI:
     def __init__(self, model, *args, **kwargs):
@@ -27,21 +31,21 @@ class LMI:
         return getattr(self._inner, name)
 
     @staticmethod
-    @utils.measure_runtime
+    @measure_runtime
     def _run_kmeans(
         n_buckets: int, dimensionality: int, X: torch.Tensor
     ) -> torch.Tensor:
         return LMIBase._run_kmeans(n_buckets, dimensionality, X)
 
-    @utils.measure_runtime
+    @measure_runtime
     def _train_model(self, X: torch.Tensor, y: torch.Tensor, epochs: int, lr: float):
         return self._inner._train_model(X, y, epochs, lr)
 
-    @utils.measure_runtime
+    @measure_runtime
     def _create_buckets(self, X: torch.Tensor):
         return self._inner._create_buckets(X)
 
-    @utils.measure_runtime
+    @measure_runtime
     def _create_buckets_scalable(
         self, dataset: Path, n_data: int, chunk_size: int
     ) -> float:
@@ -127,26 +131,27 @@ class LMI:
         logger.debug("Creating LMI (Rust backend) instance...")
         torch.manual_seed(SEED)
 
-        n_data, data_dim_original = utils.get_dataset_shape(dataset)
+        n_data, data_dim_original = get_dataset_shape(dataset)
 
         logger.info(f"Sampling training subset (sample_size={sample_size})...")
-        X_train = utils.sample_train_subset(
+        X_train = sample_train_subset(
             dataset, n_data, data_dim_original, sample_size, chunk_size
         ).to(torch.float32)
         logger.success(f"Training subset sampled: {X_train.shape}")
 
         logger.info(f"Running K-Means (n_buckets={n_buckets})...")
         start = time.time()
-        kmeans = faiss.Kmeans(
-            d=data_dim_original,
-            k=n_buckets,
-            verbose=True,
-            seed=SEED,
-            spherical=True,
-        )
-        kmeans.train(X_train)
-        y_train = torch.from_numpy(kmeans.index.search(X_train, 1)[1].T[0])  # type: ignore
-        # y_train = LMI._run_kmeans(n_buckets, data_dim_original, X_train)
+        # kmeans = faiss.Kmeans(
+        #     d=data_dim_original,
+        #     k=n_buckets,
+        #     verbose=True,
+        #     seed=SEED,
+        #     spherical=True,
+        #     max_points_per_centroid=1000000,
+        # )
+        # kmeans.train(X_train)
+        # y_train = torch.from_numpy(kmeans.index.search(X_train, 1)[1].T[0])  # type: ignore
+        y_train = LMI._run_kmeans(n_buckets, data_dim_original, X_train)
         kmeanstime = time.time() - start
         logger.success(f"K-Means completed in {kmeanstime:.2f} seconds. Labels shape: {y_train.shape}")
 
