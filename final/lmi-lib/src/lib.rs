@@ -8,9 +8,9 @@ use pyo3::prelude::*;
 use pyo3_tch::PyTensor;
 
 use rust_lmi::RustLmi;
-use rust_lmi::helpers::{from_raw_ptr, to_raw_ptr};
 use rust_lmi::helpers;
-
+use rust_lmi::helpers::{from_raw_ptr, to_raw_ptr};
+use std::collections::HashMap;
 use time::macros::format_description;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
@@ -102,16 +102,31 @@ impl LMI {
         });
     }
 
+    fn _count_bucket_sizes(
+        &self,
+        dataset_path: String,
+        n_data: usize,
+        chunk_size: usize,
+    ) -> HashMap<i64, usize> {
+        self.rust_object
+            .count_bucket_sizes(&dataset_path, n_data, chunk_size)
+    }
+
     fn _create_buckets_scalable(
         &mut self,
         dataset_path: String,
         n_data: usize,
         chunk_size: usize,
+        total_counts: HashMap<i64, usize>,
     ) -> f64 {
         Python::with_gil(|py| {
             py.allow_threads(|| {
-                self.rust_object
-                    .create_buckets_scalable(&dataset_path, n_data, chunk_size)
+                self.rust_object.create_buckets_scalable(
+                    &dataset_path,
+                    n_data,
+                    chunk_size,
+                    total_counts,
+                )
             })
         })
     }

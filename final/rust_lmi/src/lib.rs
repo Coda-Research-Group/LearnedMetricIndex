@@ -270,12 +270,12 @@ impl RustLmi {
         }
     }
 
-    pub fn create_buckets_scalable(
-        &mut self,
+    pub fn count_bucket_sizes(
+        &self,
         dataset_path_str: &str,
         n_data: usize,
         chunk_size: usize,
-    ) -> f64 {
+    ) -> HashMap<i64, usize> {
         let dataset_path = Path::new(dataset_path_str);
         let n_chunks = (n_data + chunk_size - 1) / chunk_size;
         let device = self.vs.device();
@@ -311,6 +311,19 @@ impl RustLmi {
             drop(chunk_data_f32);
         }
         info!("Pass 1: Counting complete.");
+        total_counts
+    }
+
+    pub fn create_buckets_scalable(
+        &mut self,
+        dataset_path_str: &str,
+        n_data: usize,
+        chunk_size: usize,
+        total_counts: HashMap<i64, usize>,
+    ) -> f64 {
+        let dataset_path = Path::new(dataset_path_str);
+        let n_chunks = (n_data + chunk_size - 1) / chunk_size;
+        let device = self.vs.device();
 
         info!("Initializing Bucket Storage (f16)...");
         let mut current_write_idx = HashMap::<i64, usize>::new();

@@ -52,7 +52,9 @@ class LMI:
     def _create_buckets_scalable(
         self, dataset: Path, n_data: int, chunk_size: int
     ) -> float:
-        return self._inner._create_buckets_scalable(dataset, n_data, chunk_size)
+        total_counts = self._inner._count_bucket_sizes(dataset, n_data, chunk_size)
+        gc.collect()
+        return self._inner._create_buckets_scalable(dataset, n_data, chunk_size, total_counts)
 
     @staticmethod
     def init_logging():
@@ -222,6 +224,7 @@ class LMI:
         logger.info("Creating LMI buckets by processing the full dataset...")
         encdatabasetime = lmi._create_buckets_scalable(str(dataset), n_data, chunk_size)
         logger.success(f"LMI buckets created.")
+        gc.collect()
 
         if return_time:
             return lmi, kmeanstime, trainmodeltime, modelingtime, encdatabasetime
