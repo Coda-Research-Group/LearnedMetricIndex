@@ -37,9 +37,9 @@ class LMI:
     @staticmethod
     @measure_runtime
     def _run_kmeans(
-        n_buckets: int, dimensionality: int, X: torch.Tensor
+        n_buckets: int, dimensionality: int, X: torch.Tensor, n_iter_kmeans: int
     ) -> torch.Tensor:
-        return LMIBase._run_kmeans(n_buckets, dimensionality, X)
+        return LMIBase._run_kmeans(n_buckets, dimensionality, X, n_iter_kmeans)
 
     @measure_runtime
     def _train_model(self, X: torch.Tensor, y: torch.Tensor, epochs: int, lr: float):
@@ -195,6 +195,7 @@ class LMI:
         sample_size: int,
         n_buckets: int,
         chunk_size: int,
+        n_iter_kmeans: int = 25,
         model: Optional[Sequential] = None,
         reduced_dim: Optional[int] = None,
         SEED: int = 42,
@@ -213,17 +214,7 @@ class LMI:
 
         logger.info(f"Running K-Means (n_buckets={n_buckets})...")
         start = time.time()
-        # kmeans = faiss.Kmeans(
-        #     d=data_dim_original,
-        #     k=n_buckets,
-        #     verbose=True,
-        #     seed=SEED,
-        #     spherical=True,
-        #     max_points_per_centroid=1000000,
-        # )
-        # kmeans.train(X_train)
-        # y_train = torch.from_numpy(kmeans.index.search(X_train, 1)[1].T[0])  # type: ignore
-        y_train = LMI._run_kmeans(n_buckets, data_dim_original, X_train)
+        y_train = LMI._run_kmeans(n_buckets, data_dim_original, X_train, n_iter_kmeans)
         kmeanstime = time.time() - start
         logger.success(
             f"K-Means completed in {kmeanstime:.2f} seconds. Labels shape: {y_train.shape}"

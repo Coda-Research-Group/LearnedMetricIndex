@@ -128,7 +128,7 @@ impl RustLmi {
         }
     }
 
-    pub fn run_kmeans(n_buckets: i64, dimensionality: i64, X: &Tensor) -> Tensor {
+    pub fn run_kmeans(n_buckets: i64, dimensionality: i64, X: &Tensor, n_iter_kmeans: i64) -> Tensor {
         assert_eq!(dimensionality, X.size()[1]);
 
         let v = Vec::<f32>::try_from(X.reshape([X.numel() as i64])).unwrap();
@@ -155,7 +155,7 @@ impl RustLmi {
             .random_generator(rnd)
             .build();
 
-        let kmeans = kmeans.kmeans_lloyd(n_buckets as usize, 25, KMeans::init_random_sample, &conf);
+        let kmeans = kmeans.kmeans_lloyd(n_buckets as usize, n_iter_kmeans as usize, KMeans::init_random_sample, &conf);
 
         let assignments = kmeans
             .assignments

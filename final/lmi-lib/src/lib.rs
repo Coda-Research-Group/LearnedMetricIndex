@@ -59,8 +59,8 @@ impl LMI {
     }
 
     #[staticmethod]
-    fn _run_kmeans(n_buckets: i64, dimensionality: i64, X: PyTensor) -> PyTensor {
-        PyTensor(RustLmi::run_kmeans(n_buckets, dimensionality, &X))
+    fn _run_kmeans(n_buckets: i64, dimensionality: i64, X: PyTensor, n_iter_kmeans: i64) -> PyTensor {
+        PyTensor(RustLmi::run_kmeans(n_buckets, dimensionality, &X, n_iter_kmeans))
     }
 
     fn _train_model(&mut self, X: PyTensor, y: PyTensor, epochs: i64, lr: f64) {
