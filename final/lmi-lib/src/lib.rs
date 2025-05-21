@@ -219,6 +219,11 @@ impl LMI {
         unsafe { helpers::dot_product_f32_f16_avx2(q_ptr, d_ptr, dim) }
     }
 
+    fn search_batch(&self, data: PyTensor, query: PyTensor, k: i64) -> (PyTensor, PyTensor) {
+        let (indices, distances) = self.rust_object.search_batch(&data, &query, k);
+        (PyTensor(indices), PyTensor(distances))
+    }
+
     fn search(
         &self,
         full_dim_queries: PyTensor,

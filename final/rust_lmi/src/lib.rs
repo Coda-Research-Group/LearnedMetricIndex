@@ -424,6 +424,80 @@ impl RustLmi {
         encdatabasetime
     }
 
+    // data: [n_data, dim]
+    // query: [dim]
+    pub fn search_batch(
+        &self,
+        data: &Tensor,
+        query: &Tensor,
+        k: i64,
+    ) -> (Tensor, Tensor) {
+        let device = data.device();
+        assert_eq!(query.device(), device);
+
+        assert_eq!(
+            data.size()[1],
+            query.size()[0],
+            "Data dim ({}) does not match query dim ({})",
+            data.size()[1],
+            query.size()[0]
+        );
+
+        let query = if query.kind() == Kind::Float {
+            query.shallow_clone()
+        } else {
+            query.to_kind(Kind::Float)
+        };
+
+        let n_vectors = data.size()[0];
+
+        let mut distances = Vec::with_capacity(n_vectors as usize);
+        let data_ptr = data.data_ptr() as *const f16;
+        let query_ptr = query.data_ptr() as *const f32;
+        let dim = query.size()[0] as usize;
+
+        for i in 0..n_vectors {
+            let vector_ptr = unsafe { data_ptr.add(i as usize * dim) };
+            let distance = if is_x86_feature_detected!("f16c") {
+                unsafe {
+                    helpers::dot_product_f32_f16_avx2(query_ptr, vector_ptr as *const f16, dim)
+                }
+            } else {
+                let vector_ptr_f32: *const f32 = vector_ptr as *const f32;
+                unsafe { helpers::dot_product_avx2(query_ptr, vector_ptr_f32, dim) }
+            };
+            distances.push(distance);
+        }
+
+        // Get top k indices
+        let mut indices_with_distances: Vec<(usize, f32)> =
+            distances.iter().enumerate().map(|(i, &d)| (i, d)).collect();
+
+        indices_with_distances.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+
+        let mut top_k_indices: Vec<i64> = indices_with_distances
+            .iter()
+            .take(k as usize)
+            .map(|(i, _)| *i as i64)
+            .collect();
+
+        let mut top_k_distances: Vec<f32> = indices_with_distances
+            .iter()
+            .take(k as usize)
+            .map(|(_, d)| *d)
+            .collect();
+
+        while top_k_indices.len() < k as usize {
+            top_k_indices.push(-1);
+            top_k_distances.push(std::f32::NEG_INFINITY);
+        }
+
+        (
+            Tensor::from_slice(&top_k_indices).to_device(device),
+            Tensor::from_slice(&top_k_distances).to_device(device),
+        )
+    }
+
     pub fn search(
         &self,
         full_dim_queries: &Tensor,
