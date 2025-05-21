@@ -1,3 +1,5 @@
+# Adapted from https://github.com/Coda-Research-Group/LearnedMetricIndex/blob/paper-sisap24-indexing-challenge/utils.py
+
 from __future__ import annotations
 
 import functools

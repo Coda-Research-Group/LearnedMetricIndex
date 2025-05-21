@@ -4,9 +4,11 @@ import os
 import torch
 
 # Set the LD_LIBRARY_PATH dynamically
-libtorch_path = os.path.join(torch.__path__[0], 'lib')
-if libtorch_path not in os.environ.get('LD_LIBRARY_PATH', ''):
-    os.environ['LD_LIBRARY_PATH'] = libtorch_path + ":" + os.environ.get('LD_LIBRARY_PATH', '')
+libtorch_path = os.path.join(torch.__path__[0], "lib")
+if libtorch_path not in os.environ.get("LD_LIBRARY_PATH", ""):
+    os.environ["LD_LIBRARY_PATH"] = (
+        libtorch_path + ":" + os.environ.get("LD_LIBRARY_PATH", "")
+    )
 
 
 from .lmi import LMI as LMIBase
@@ -21,6 +23,7 @@ from pathlib import Path
 from typing import Optional
 from loguru import logger
 import time
+
 
 class LMI:
     def __init__(self, model, *args, **kwargs):
@@ -54,6 +57,34 @@ class LMI:
     @staticmethod
     def init_logging():
         LMIBase.init_logging()
+
+    @staticmethod
+    def _dot_product_scalar(q: torch.Tensor, d: torch.Tensor) -> float:
+        return LMIBase.dot_product_scalar(q, d)
+
+    @staticmethod
+    def _dot_product_avx2(q: torch.Tensor, d: torch.Tensor) -> float:
+        return LMIBase.dot_product_avx2(q, d)
+
+    @staticmethod
+    def _dot_product_avx2_fma(q: torch.Tensor, d: torch.Tensor) -> float:
+        return LMIBase.dot_product_avx2_fma(q, d)
+
+    @staticmethod
+    def _dot_product_avx2_reg_sum(q: torch.Tensor, d: torch.Tensor) -> float:
+        return LMIBase.dot_product_avx2_reg_sum(q, d)
+
+    @staticmethod
+    def _dot_product_avx2_fma_reg_sum(q: torch.Tensor, d: torch.Tensor) -> float:
+        return LMIBase.dot_product_avx2_fma_reg_sum(q, d)
+
+    @staticmethod
+    def _dot_product_avx512(q: torch.Tensor, d: torch.Tensor) -> float:
+        return LMIBase.dot_product_avx512(q, d)
+
+    @staticmethod
+    def _dot_product_f32_f16_avx2(q: torch.Tensor, d: torch.Tensor) -> float:
+        return LMIBase.dot_product_f32_f16_avx2(q, d)
 
     def _encode(self, X: torch.Tensor) -> tuple[torch.Tensor, float]:
         logger.info(
@@ -153,7 +184,9 @@ class LMI:
         # y_train = torch.from_numpy(kmeans.index.search(X_train, 1)[1].T[0])  # type: ignore
         y_train = LMI._run_kmeans(n_buckets, data_dim_original, X_train)
         kmeanstime = time.time() - start
-        logger.success(f"K-Means completed in {kmeanstime:.2f} seconds. Labels shape: {y_train.shape}")
+        logger.success(
+            f"K-Means completed in {kmeanstime:.2f} seconds. Labels shape: {y_train.shape}"
+        )
 
         if model is None:
             logger.info(f"Defining default model for input dim: {data_dim_original}")

@@ -1,6 +1,6 @@
 [package]
 name = "lmi"
-version = "0.4.8"
+version = "0.4.9"
 edition = "2024"
 
 [lib]
@@ -15,3 +15,4 @@ rust-lmi = { path = "../rust_lmi" }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.18", features = ["fmt", "time", "local-time"] }
 time = { version = "0.3.41", features = ["macros", "local-offset"] }
+half = "2.4.1"

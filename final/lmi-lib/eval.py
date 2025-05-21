@@ -1,4 +1,4 @@
-# Adapted from https://github.com/sisap-challenges/sisap23-laion-challenge-evaluation/blob/0a6f90debe73365abee210d3950efc07223c846d/eval.py
+# Adapted from https://github.com/Coda-Research-Group/LearnedMetricIndex/blob/paper-sisap24-indexing-challenge/eval.py
 
 import argparse
 import csv

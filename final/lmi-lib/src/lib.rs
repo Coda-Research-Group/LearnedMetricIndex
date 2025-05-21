@@ -9,11 +9,14 @@ use pyo3_tch::PyTensor;
 
 use rust_lmi::RustLmi;
 use rust_lmi::helpers::{from_raw_ptr, to_raw_ptr};
+use rust_lmi::helpers;
 
 use time::macros::format_description;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 use tracing_subscriber::fmt::time::LocalTime;
+
+use half::f16;
 
 #[allow(clippy::upper_case_acronyms)]
 #[pyclass]
@@ -136,6 +139,69 @@ impl LMI {
                 PyTensor(slf.transform_tsvd(X))
             })
         })
+    }
+
+    #[staticmethod]
+    fn dot_product_scalar(q: PyTensor, d: PyTensor) -> f32 {
+        let q_ptr = q.data_ptr() as *const f32;
+        let d_ptr = d.data_ptr() as *const f32;
+        let dim = q.size()[0] as usize;
+
+        unsafe { helpers::dot_product_scalar(q_ptr, d_ptr, dim) }
+    }
+
+    #[staticmethod]
+    fn dot_product_avx2(q: PyTensor, d: PyTensor) -> f32 {
+        let q_ptr = q.data_ptr() as *const f32;
+        let d_ptr = d.data_ptr() as *const f32;
+        let dim = q.size()[0] as usize;
+
+        unsafe { helpers::dot_product_avx2(q_ptr, d_ptr, dim) }
+    }
+
+    #[staticmethod]
+    fn dot_product_avx2_fma(q: PyTensor, d: PyTensor) -> f32 {
+        let q_ptr = q.data_ptr() as *const f32;
+        let d_ptr = d.data_ptr() as *const f32;
+        let dim = q.size()[0] as usize;
+
+        unsafe { helpers::dot_product_avx2_fma(q_ptr, d_ptr, dim) }
+    }
+
+    #[staticmethod]
+    fn dot_product_avx2_reg_sum(q: PyTensor, d: PyTensor) -> f32 {
+        let q_ptr = q.data_ptr() as *const f32;
+        let d_ptr = d.data_ptr() as *const f32;
+        let dim = q.size()[0] as usize;
+
+        unsafe { helpers::dot_product_avx2_reg_sum(q_ptr, d_ptr, dim) }
+    }
+
+    #[staticmethod]
+    fn dot_product_avx2_fma_reg_sum(q: PyTensor, d: PyTensor) -> f32 {
+        let q_ptr = q.data_ptr() as *const f32;
+        let d_ptr = d.data_ptr() as *const f32;
+        let dim = q.size()[0] as usize;
+
+        unsafe { helpers::dot_product_avx2_fma_reg_sum(q_ptr, d_ptr, dim) }
+    }
+
+    #[staticmethod]
+    fn dot_product_avx512(q: PyTensor, d: PyTensor) -> f32 {
+        let q_ptr = q.data_ptr() as *const f32;
+        let d_ptr = d.data_ptr() as *const f32;
+        let dim = q.size()[0] as usize;
+
+        unsafe { helpers::dot_product_avx512(q_ptr, d_ptr, dim) }
+    }
+
+    #[staticmethod]
+    fn dot_product_f32_f16_avx2(q: PyTensor, d: PyTensor) -> f32 {
+        let q_ptr = q.data_ptr() as *const f32;
+        let d_ptr = d.data_ptr() as *const f16;
+        let dim = q.size()[0] as usize;
+
+        unsafe { helpers::dot_product_f32_f16_avx2(q_ptr, d_ptr, dim) }
     }
 
     fn search(
