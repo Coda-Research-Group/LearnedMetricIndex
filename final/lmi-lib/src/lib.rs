@@ -240,26 +240,6 @@ impl LMI {
         (PyTensor(indices), PyTensor(distances))
     }
 
-    fn search_with_reranking(
-        &self,
-        original_queries_f32: PyTensor,
-        original_dataset_path_str: String,
-        final_k: i64,
-        nprobe_stage1: i64,
-        num_candidates_for_rerank: i64,
-        transformed_queries: Option<PyTensor>,
-    ) -> (PyTensor, PyTensor) {
-        let (indices, distances) = self.rust_object.search_with_reranking(
-            &original_queries_f32,
-            &original_dataset_path_str,
-            final_k,
-            nprobe_stage1,
-            num_candidates_for_rerank,
-            transformed_queries.as_ref().map(|t| &**t),
-        );
-        (PyTensor(indices), PyTensor(distances))
-    }
-
     fn test_read_raw_tensor(&self) {
         let t = Tensor::from_slice(&[1, 2, 3]);
 

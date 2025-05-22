@@ -25,6 +25,10 @@ from loguru import logger
 import time
 from tqdm import tqdm
 
+import h5py
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Tuple
+
 
 class LMI:
     def __init__(self, model, *args, **kwargs):
@@ -123,6 +127,82 @@ class LMI:
             return result, encqueriestime
         return result
 
+    def _rerank_single_query(self, args_tuple):
+        (
+            query_idx,
+            full_dim_query_vector,
+            candidate_indices_for_query,
+            candidate_dists_for_query,
+            original_dataset_path_str,
+            final_k,
+            num_candidates_for_rerank,
+        ) = args_tuple
+
+        if (candidate_dists_for_query > 0).sum() == 0:
+            return (
+                query_idx,
+                torch.full((final_k,), -1, dtype=torch.int64),
+                torch.full((final_k,), float("-inf"), dtype=torch.float32),
+            )
+
+        candidate_dists_topk, candidate_idx_topk = torch.topk(
+            candidate_dists_for_query, num_candidates_for_rerank
+        )
+        valid_mask = candidate_dists_topk > 0
+        filtered_original_indices = candidate_indices_for_query[
+            candidate_idx_topk[valid_mask]
+        ]
+
+        if len(filtered_original_indices) == 0:
+            return (
+                query_idx,
+                torch.full((final_k,), -1, dtype=torch.int64),
+                torch.full((final_k,), float("-inf"), dtype=torch.float32),
+            )
+
+        candidates_to_load = torch.sort(filtered_original_indices)[0]
+
+        real_data = utils.load_real_data(
+            original_dataset_path_str, candidates_to_load
+        ).reshape(-1, full_dim_query_vector.shape[0])
+
+        if real_data.shape[0] == 0:
+            return (
+                query_idx,
+                torch.full((final_k,), -1, dtype=torch.int64),
+                torch.full((final_k,), float("-inf"), dtype=torch.float32),
+            )
+
+        reranked_local_indices, reranked_distances = self._inner.search_batch(
+            real_data, full_dim_query_vector, final_k
+        )
+
+        valid_mask_rerank = reranked_local_indices != -1
+        valid_local_indices = reranked_local_indices[valid_mask_rerank]
+
+        final_indices = candidates_to_load[valid_local_indices]
+
+        final_distances = reranked_distances[valid_mask_rerank]
+
+        num_found = final_indices.shape[0]
+        if num_found < final_k:
+            padding_indices = torch.full(
+                (final_k - num_found,),
+                -1,
+                dtype=torch.int64,
+                device=final_indices.device,
+            )
+            padding_dists = torch.full(
+                (final_k - num_found,),
+                float("-inf"),
+                dtype=torch.float32,
+                device=final_distances.device,
+            )
+            final_indices = torch.cat((final_indices, padding_indices))
+            final_distances = torch.cat((final_distances, padding_dists))
+
+        return query_idx, final_indices, final_distances
+
     def search_with_reranking(
         self,
         full_dim_queries: torch.Tensor,
@@ -138,54 +218,60 @@ class LMI:
         transformed_queries, encqueriestime = None, 0.0
         if self._inner.dimensionality != full_dim_queries.shape[1]:
             transformed_queries, encqueriestime = self._encode(full_dim_queries)
-        # result = self._inner.search_with_reranking(
-        #     full_dim_queries,
-        #     original_dataset_path_str,
-        #     final_k,
-        #     nprobe_stage1,
-        #     num_candidates_for_rerank,
-        #     transformed_queries,
-        # )
-        indices = torch.zeros((full_dim_queries.shape[0], final_k), dtype=torch.int64)
-        distances = torch.zeros(
-            (full_dim_queries.shape[0], final_k), dtype=torch.float32
-        )
+
         all_candidate_indices, all_candidate_dists = self._inner.search(
             full_dim_queries,
             num_candidates_for_rerank,
             nprobe_stage1,
             transformed_queries,
         )
-        print(f"{all_candidate_indices.shape=}")
-        for i, (candidate_indices, candidate_dists) in tqdm(
-            enumerate(zip(all_candidate_indices, all_candidate_dists)),
-            total=full_dim_queries.shape[0],
-        ):
-            if (candidate_dists > 0).sum() == 0:
-                indices[i].fill_(-1)
-                distances[i].fill_(float("-inf"))
+        print(
+            f"Stage 1 candidate shapes: indices={all_candidate_indices.shape}, dists={all_candidate_dists.shape}"
+        )
+
+        n_queries = full_dim_queries.shape[0]
+        final_indices_all = torch.zeros((n_queries, final_k), dtype=torch.int64)
+        final_distances_all = torch.zeros((n_queries, final_k), dtype=torch.float32)
+
+        tasks = []
+        for i in range(n_queries):
+            actual_num_cand_for_query = min(
+                num_candidates_for_rerank,
+                (all_candidate_dists[i] > float("-inf")).sum().item(),
+            )
+            if actual_num_cand_for_query == 0:
+                final_indices_all[i].fill_(-1)
+                final_distances_all[i].fill_(float("-inf"))
                 continue
 
-            candidate_dists_topk, candidate_idx_topk = torch.topk(
-                candidate_dists, num_candidates_for_rerank
+            tasks.append(
+                (
+                    i,
+                    full_dim_queries[i],
+                    all_candidate_indices[i, :actual_num_cand_for_query],
+                    all_candidate_dists[i, :actual_num_cand_for_query],
+                    original_dataset_path_str,
+                    final_k,
+                    actual_num_cand_for_query,
+                )
             )
 
-            valid_mask = candidate_dists_topk > 0
-            filtered_idx = candidate_idx_topk[valid_mask]
-            candidates = torch.sort(candidate_indices[filtered_idx])[0]
+        with ThreadPoolExecutor(max_workers=None) as executor:
+            results = list(
+                tqdm(
+                    executor.map(self._rerank_single_query, tasks),
+                    total=len(tasks),
+                    desc="Reranking queries",
+                )
+            )
 
-            real_data = utils.load_real_data(
-                original_dataset_path_str, candidates
-            ).reshape(-1, full_dim_queries.shape[1])
-
-            I, D = self._inner.search_batch(real_data, full_dim_queries[i], final_k)
-
-            indices[i] = candidates[I]
-            distances[i] = D
+        for query_idx, f_indices, f_dists in results:
+            final_indices_all[query_idx] = f_indices
+            final_distances_all[query_idx] = f_dists
 
         if return_time:
-            return (indices, distances), encqueriestime
-        return indices, distances
+            return (final_indices_all, final_distances_all), encqueriestime
+        return final_indices_all, final_distances_all
 
     @staticmethod
     def create(
@@ -195,7 +281,7 @@ class LMI:
         sample_size: int,
         n_buckets: int,
         chunk_size: int,
-        n_iter_kmeans: int = 25,
+        n_iter_kmeans: int = 1,
         model: Optional[Sequential] = None,
         reduced_dim: Optional[int] = None,
         SEED: int = 42,
