@@ -1,2 +1,0 @@
-RUSTFLAGS="-C linker=gcc" LIBTORCH_USE_PYTORCH=1 maturin build --release  --skip-auditwheel --manylinux 2_34
-maturin upload ../target/wheels/lmi_rs-0.1.0-cp311-cp311-manylinux_2_34_x86_64.whl --username __token__ --password PASS
