@@ -281,7 +281,7 @@ class LMI:
         sample_size: int,
         n_buckets: int,
         chunk_size: int,
-        n_iter_kmeans: int = 1,
+        n_iter_kmeans: int = 25,
         model: Optional[Sequential] = None,
         reduced_dim: Optional[int] = None,
         SEED: int = 42,
