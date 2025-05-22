@@ -26,7 +26,6 @@ use ndarray::Array2;
 use ndarray::s;
 use rayon::prelude::*;
 use std::path::Path;
-use std::sync::Arc;
 use tracing::{error, info};
 
 use petal_decomposition::{RandomizedPca, RandomizedPcaBuilder};
@@ -147,15 +146,13 @@ impl RustLmi {
 
         let conf: KMeansConfig<f32> = KMeansConfig::build()
             .iteration_done(&|s, nr, new_distsum| {
-                if nr % 10 == 0 {
-                    info!(
-                        "Iteration {} - Error: {:.2} -> {:.2} | Improvement: {:.2}",
-                        nr,
-                        s.distsum,
-                        new_distsum,
-                        s.distsum - new_distsum
-                    );
-                }
+                info!(
+                    "Iteration {} - Error: {:.2} -> {:.2} | Improvement: {:.2}",
+                    nr,
+                    s.distsum,
+                    new_distsum,
+                    s.distsum - new_distsum
+                );
             })
             .random_generator(rnd)
             .build();
