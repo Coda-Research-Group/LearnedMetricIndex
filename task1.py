@@ -50,6 +50,19 @@ class MLP(Module):
         outputs = self.layers(inputs)
         return outputs
 
+    def expand_to(self, n_buckets: int) -> None:
+        old_classifier: Linear = self.layers[-1]
+        current_classes = old_classifier.out_features
+
+        if n_buckets <= current_classes:
+            return
+
+        new_classifier = Linear(old_classifier.in_features, n_buckets)
+        with torch.no_grad():
+            new_classifier.weight[:current_classes] = old_classifier.weight[:current_classes]
+            new_classifier.bias[:current_classes] = old_classifier.bias[:current_classes]
+        self.layers[-1] = new_classifier
+
 
 class LMIDataset(Dataset):
     def __init__(self, X: Tensor, y: Tensor):
