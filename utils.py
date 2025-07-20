@@ -70,14 +70,18 @@ def get_dataset_size(dataset: Path) -> int:
     return get_dataset_shape(dataset)[0]
 
 
+def ensure_float32(data: Tensor) -> Tensor:
+    return data.to(torch.float32)  # type: ignore
+
+
 def load_queries() -> Tensor:
     queries_path = Path('data2024/public-queries-2024-laion2B-en-clip768v2-n=10k.h5')
-    return torch.from_numpy(h5py.File(queries_path, 'r')['emb'][:]).to(torch.float32)  # type: ignore
+    return ensure_float32(torch.from_numpy(h5py.File(queries_path, 'r')['emb'][:]))  # type: ignore
 
 
 def load_ground_truth(dataset_size: str, k: int = 30) -> Tensor:
     ground_truth_path = Path(f'data2024/gold-standard-dbsize={dataset_size}--public-queries-2024-laion2B-en-clip768v2-n=10k.h5')
-    return torch.from_numpy(h5py.File(ground_truth_path, 'r')['knns'][:, :k]).to(torch.float32)  # type: ignore
+    return ensure_float32(torch.from_numpy(h5py.File(ground_truth_path, 'r')['knns'][:, :k]))  # type: ignore
 
 
 def load_indices(dataset: Path, n_data: int, dim: int, indices: Tensor, chunk_size: int) -> Tensor:
