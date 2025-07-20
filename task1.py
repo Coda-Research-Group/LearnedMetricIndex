@@ -90,6 +90,8 @@ class LMI:
         """Mapping from bucket ID to the indices of the data in the bucket."""
         self._next_id: int = 0
         """Keeps track of the next available unique data ID to be inserted."""
+        self._bucket_threshold: int = 0
+        """Maximum possible number of samples in a bucket before split."""
 
     @utils.measure_runtime
     @staticmethod
@@ -236,6 +238,12 @@ class LMI:
 
         return offsets
 
+    def _set_threshold(self) -> None:
+        total = 0
+        for bucket in range(self.n_buckets):
+            total += int(self.bucket_data_ids[bucket].shape[0])
+        self._bucket_threshold = total // self.n_buckets * 2
+
     @utils.measure_runtime
     def _create_buckets(self, dataset: Path, n_data: int, chunk_size: int) -> None:
         logger.debug('Started bucket creation')
@@ -259,8 +267,9 @@ class LMI:
             self._chunk_sort(dataset, classes, i, offsets, chunk_size)
         gc.collect()
 
-        # After creating and filling up all the buckets, set the next available id
+        # After creating and filling up all the buckets, set the next available id and threshold
         self._next_id = sum(len(ids) for ids in self.bucket_data_ids.values())
+        self._set_threshold()
 
     @utils.measure_runtime
     @staticmethod
