@@ -21,7 +21,7 @@ import torch
 import torch.utils
 from loguru import logger
 from torch import Tensor
-from torch.nn import CrossEntropyLoss, Linear, ReLU, Sequential
+from torch.nn import CrossEntropyLoss, Linear, Module, ReLU, Sequential
 from torch.optim import Adam
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
@@ -37,6 +37,20 @@ torch.manual_seed(SEED)
 Offsets = dict[int, dict[int, int]]
 
 
+class MLP(Module):
+    def __init__(self, in_features: int, out_features: int):
+        super(MLP, self).__init__()
+        self.layers = Sequential(
+            Linear(in_features, 512),
+            ReLU(),
+            Linear(512, out_features),
+        )
+
+    def forward(self, inputs: Tensor) -> Tensor:
+        outputs = self.layers(inputs)
+        return outputs
+
+
 class LMIDataset(Dataset):
     def __init__(self, X: Tensor, y: Tensor):
         self.X = X
@@ -50,7 +64,7 @@ class LMIDataset(Dataset):
 
 
 class LMI:
-    def __init__(self, n_buckets: int, data_dimensionality: int, model: Sequential):
+    def __init__(self, n_buckets: int, data_dimensionality: int, model: MLP):
         self.n_buckets: int = n_buckets
         """Number of buckets."""
         self.dimensionality: int = data_dimensionality
@@ -67,7 +81,7 @@ class LMI:
     @utils.measure_runtime
     @staticmethod
     def _train_model(
-        model: Sequential,
+        model: MLP,
         X: Tensor,
         y: Tensor,
         epochs: int,
@@ -265,12 +279,7 @@ class LMI:
 
         y = LMI._run_kmeans(n_buckets, data_dim, X_train)
 
-        nn = Sequential(
-            Linear(data_dim, 512),
-            ReLU(),
-            Linear(512, n_buckets),
-        )
-
+        nn = MLP(data_dim, n_buckets)
         LMI._train_model(nn, X_train, y, epochs, lr)
 
         del X_train
