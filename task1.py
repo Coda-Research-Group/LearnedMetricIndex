@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 
+from matplotlib import pyplot as plt
+
 os.environ['MKL_NUM_THREADS'] = '27'
 os.environ['OMP_NUM_THREADS'] = '27'
 os.environ['OMP_DYNAMIC'] = 'FALSE'
@@ -9,7 +11,6 @@ os.environ['MKL_DYNAMIC'] = 'FALSE'
 
 import argparse
 import gc
-import time
 from concurrent.futures import ThreadPoolExecutor
 from math import ceil, sqrt
 from pathlib import Path
@@ -25,6 +26,7 @@ from torch.optim import Adam
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
+import eval
 import utils
 
 torch.set_num_threads(27)
@@ -59,6 +61,8 @@ class LMI:
         """Mapping from bucket ID to the data in the bucket."""
         self.bucket_data_ids: dict[int, Tensor] = {}
         """Mapping from bucket ID to the indices of the data in the bucket."""
+        self._next_id: int = 0
+        """Keeps track of the next available unique data ID to be inserted."""
 
     @utils.measure_runtime
     @staticmethod
@@ -228,6 +232,9 @@ class LMI:
             self._chunk_sort(dataset, classes, i, offsets, chunk_size)
         gc.collect()
 
+        # After creating and filling up all the buckets, set the next available id
+        self._next_id = sum(len(ids) for ids in self.bucket_data_ids.values())
+
     @utils.measure_runtime
     @staticmethod
     def _run_kmeans(n_buckets: int, data_dim: int, X_train: Tensor) -> Tensor:
@@ -276,6 +283,61 @@ class LMI:
 
         return lmi
 
+    @utils.measure_runtime
+    def naive_insert(self, data: Tensor, stats: BucketInsertionStats) -> None:
+        # Ensure batched input in case of a single data point
+        if data.dim() == 1:
+            data = data.unsqueeze(0)
+
+        data = utils.ensure_float32(data).cpu()
+        predicted_bucket_ids = self._predict(data, top_k=1).reshape(-1)
+
+        n_data = data.shape[0]
+        new_ids = torch.arange(self._next_id, self._next_id + n_data, dtype=torch.int32)
+        self._next_id += n_data
+
+        for i in range(n_data):
+            vector = data[i : i + 1].to(torch.float16)
+            bucket = int(predicted_bucket_ids[i].item())
+            stats.insert_into(bucket)
+
+            self.bucket_data[bucket] = torch.cat([self.bucket_data[bucket], vector], dim=0)
+            self.bucket_data_ids[bucket] = torch.cat([self.bucket_data_ids[bucket], new_ids[i : i + 1]], dim=0)
+
+    def get_bucket_sizes(self) -> str:
+        result = str()
+        for bucket in range(self.n_buckets):
+            result += f"Bucket {bucket}: {int(self.bucket_data_ids[bucket].shape[0])} samples.\n"
+        return result
+
+class BucketInsertionStats:
+    def __init__(self, n_buckets: int):
+        self.stats = {bucket: 0 for bucket in range(n_buckets)}
+
+    def insert_into(self, bucket: int) -> None:
+        logger.debug(f'Inserting into bucket {bucket}.')
+        self.stats[bucket] += 1
+
+    def __str__(self) -> str:
+        result = str()
+        for bucket, inserted in self.stats.items():
+            if inserted >= 1:
+                result += f"Bucket {bucket}: {inserted} insertions.\n"
+        return result
+
+
+def plot_recalls(recalls, nprobe, plot_every=1):
+    x, y = zip(*recalls)
+    plt.plot(x[::plot_every], y[::plot_every])
+    plt.axhline(0.9, linestyle='--', color='red', label='90% Recall Target')
+    plt.xlabel("Number of Insertions")
+    plt.ylabel(f"Recall After nprobe={nprobe}")
+    plt.title("Recall During Naive Inserts")
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
 
 def task1(
     dataset_size: str,
@@ -283,55 +345,56 @@ def task1(
     lr: float,
     sample_size: int,
     alpha: float,
-    # nprobe: int,
+    nprobe: int,
     chunk_size: int,
 ) -> None:
     dataset = Path(f'data2024/laion2B-en-clip768v2-n={dataset_size}.h5')
 
     n_buckets = int(alpha * sqrt(utils.get_dataset_size(dataset)))
 
-    start = time.time()
     lmi = LMI.create(dataset, epochs, lr, sample_size, n_buckets, chunk_size)
-    buildtime = time.time() - start
+    logger.debug(f'Bucket sizes before insert:\n{lmi.get_bucket_sizes()}')
 
     queries = utils.load_queries()
 
-    k = 30
+    # Naive insertion - Experiment
+    true_I = eval.get_groundtruth(size="300K")
+    recalls = []
+    search_every = 10
+    k = 10
 
-    nprobes = range(1, 30 + 1)
-    if dataset_size == '300K':
-        nprobes = [1]
+    insertion_stats = BucketInsertionStats(n_buckets=n_buckets)
 
-    for nprobe in nprobes:
-        start = time.time()
-        D, I = lmi.search(queries, k, nprobe)
-        searchtime = time.time() - start
+    for i in range(queries.shape[0]):
+        lmi.naive_insert(queries[i], insertion_stats)  # insert one vector at a time
 
-        identifier = f't1-{dataset_size}-epochs={epochs}-lr={lr}-sample={sample_size}-alpha={alpha}-chunk_size={chunk_size}-nprobe={nprobe}'
-        modelingtime, encdatabasetime, encqueriestime = 0.0, 0.0, 0.0
+        if (i + 1) % search_every == 0:
+            # Run search on all queries seen so far
+            q = queries[: i + 1]
+            _, I = lmi.search(q, k=k, nprobe=nprobe)
 
-        utils.store_results(
-            Path('result/') / 'task1' / dataset_size / f'{identifier}.h5',
-            'lmi',
-            D,
-            I + 1,
-            modelingtime,
-            encdatabasetime,
-            encqueriestime,
-            buildtime,
-            searchtime,
-            identifier,
-            dataset_size,
-        )
+            # Compare predicted indices to ground truth
+            gt = true_I[: i + 1, :k]
+
+            recall = eval.get_recall(I + 1, gt, k=k)
+            recalls.append((i + 1, recall))
+
+    logger.debug(f'Bucket insertions:\n{insertion_stats}')
+    logger.debug(f'Bucket sizes after insert:\n{lmi.get_bucket_sizes()}')
+
+    # Plot recalls after insertions
+    # plot_every = queries.shape[0] // search_every // 25
+    plot_recalls(recalls, nprobe)
 
 
+# python task1.py --dataset-size 300K --sample-size 100000 --chunk-size 100000 --nprobe 1 &>task1.log
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--epochs', type=int, default=15)
     parser.add_argument('--lr', type=float, default=0.00098)
     parser.add_argument('--sample-size', type=int, default=1_000_000)
     parser.add_argument('--alpha', type=float, default=1.0)
-    # parser.add_argument('--nprobe', type=int, default=5)
+    parser.add_argument('--nprobe', type=int, default=5)
     parser.add_argument('--dataset-size', type=str, default='100M')
     parser.add_argument('--chunk-size', type=int, default=1_000_000)
     args = parser.parse_args()
