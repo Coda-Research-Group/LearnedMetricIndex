@@ -57,6 +57,8 @@ class MLP(Module):
         if n_buckets <= current_classes:
             return
 
+        logger.debug(f'Expanding classifier to {n_buckets} buckets')
+
         new_classifier = Linear(old_classifier.in_features, n_buckets)
         with torch.no_grad():
             new_classifier.weight[:current_classes] = old_classifier.weight[:current_classes]
@@ -77,7 +79,7 @@ class LMIDataset(Dataset):
 
 
 class LMI:
-    def __init__(self, n_buckets: int, data_dimensionality: int, model: MLP):
+    def __init__(self, n_buckets: int, data_dimensionality: int, model: MLP, replay_size: int):
         self.n_buckets: int = n_buckets
         """Number of buckets."""
         self.dimensionality: int = data_dimensionality
@@ -92,6 +94,8 @@ class LMI:
         """Keeps track of the next available unique data ID to be inserted."""
         self._bucket_threshold: int = 0
         """Maximum possible number of samples in a bucket before split."""
+        self._replay_size: int = replay_size
+        """Maximum amount of old data to use when retraining the model."""
 
     @utils.measure_runtime
     @staticmethod
@@ -121,6 +125,52 @@ class LMI:
             logger.debug(f'Epoch {epoch} | Loss {loss.item()}')  # type: ignore
 
         logger.debug('Finished training')
+
+    @utils.measure_runtime
+    def _retrain_model(self, affected_buckets: list[int]) -> None:
+        assert self.model is not None, 'Model is not trained yet.'
+
+        X = []
+        y = []
+
+        for bucket_id in affected_buckets:
+            data = self.bucket_data[bucket_id]
+            labels = torch.full((len(data),), bucket_id, dtype=torch.long)
+            X.append(data)
+            y.append(labels)
+
+        X_replay = []
+        y_replay = []
+
+        per_bucket = self._replay_size // (self.n_buckets - 2)
+
+        for bucket_id in range(self.n_buckets):
+            if bucket_id in affected_buckets:
+                continue
+
+            data = self.bucket_data[bucket_id]
+            if data.shape[0] == 0:
+                continue
+            labels = torch.full((len(data),), bucket_id, dtype=torch.long)
+
+            X_bucket, y_bucket = utils.herd_from(data, labels, per_bucket)
+
+            X_replay.append(X_bucket)
+            y_replay.append(y_bucket)
+
+        X, y = torch.cat(X), torch.cat(y)
+        X_replay, y_replay = torch.cat(X_replay), torch.cat(y_replay)
+        X_train, y_train = torch.cat([X, X_replay]), torch.cat([y, y_replay])
+
+        logger.debug(f'Retraining model with affected buckets {affected_buckets}')
+
+        LMI._train_model(
+            model=self.model,
+            X=X_train,
+            y=y_train,
+            epochs=5,
+            lr=0.00098,
+        )
 
     def _visit_bucket(self, bucket: int, query: Tensor, k: int) -> tuple[Tensor, Tensor]:
         if len(self.bucket_data[bucket]) == 0:
@@ -157,7 +207,7 @@ class LMI:
         return dists, Is[indices_to_keep], query_idx
 
     def _split_bucket(self, bucket: int) -> int:
-        logger.warning(f"Splitting bucket {bucket} with {len(self.bucket_data[bucket])} samples")
+        logger.debug(f'Splitting bucket {bucket} with {len(self.bucket_data[bucket])} samples')
 
         data = self.bucket_data[bucket]
         ids = self.bucket_data_ids[bucket]
@@ -175,7 +225,6 @@ class LMI:
         self.bucket_data_ids[new_bucket] = ids[split_new]
 
         self.n_buckets += 1
-        self.model.expand_to(self.n_buckets)
 
         return new_bucket
 
@@ -316,6 +365,7 @@ class LMI:
         sample_size: int,
         n_buckets: int,
         chunk_size: int,
+        replay_size: int,
     ) -> LMI:
         n_data, data_dim = utils.get_dataset_shape(dataset)
         X_train = utils.sample_train_subset(dataset, n_data, data_dim, sample_size, chunk_size)
@@ -330,7 +380,7 @@ class LMI:
         del X_train
         gc.collect()
 
-        lmi = LMI(n_buckets, data_dim, nn)
+        lmi = LMI(n_buckets, data_dim, nn, replay_size)
 
         # Store the vectors and their IDs in the corresponding buckets
         lmi._create_buckets(dataset, n_data, chunk_size)
@@ -361,6 +411,8 @@ class LMI:
             if len(self.bucket_data[bucket]) > self._bucket_threshold:
                 new_bucket = self._split_bucket(bucket)
                 stats.extend_with(new_bucket)
+                self.model.expand_to(self.n_buckets)
+                self._retrain_model(affected_buckets=[bucket, new_bucket])
 
     def get_bucket_sizes(self) -> str:
         result = str()
@@ -409,12 +461,13 @@ def task1(
     alpha: float,
     nprobe: int,
     chunk_size: int,
+    replay_size: int,
 ) -> None:
     dataset = Path(f'data2024/laion2B-en-clip768v2-n={dataset_size}.h5')
 
     n_buckets = int(alpha * sqrt(utils.get_dataset_size(dataset)))
 
-    lmi = LMI.create(dataset, epochs, lr, sample_size, n_buckets, chunk_size)
+    lmi = LMI.create(dataset, epochs, lr, sample_size, n_buckets, chunk_size, replay_size)
     logger.debug(f'Bucket sizes before insert:\n{lmi.get_bucket_sizes()}')
 
     queries = utils.load_queries()
@@ -459,6 +512,7 @@ if __name__ == '__main__':
     parser.add_argument('--nprobe', type=int, default=5)
     parser.add_argument('--dataset-size', type=str, default='100M')
     parser.add_argument('--chunk-size', type=int, default=1_000_000)
+    parser.add_argument('--replay-size', type=int, default=5_000)
     args = parser.parse_args()
 
     task1(**vars(args))
