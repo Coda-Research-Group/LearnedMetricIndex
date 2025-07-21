@@ -156,6 +156,27 @@ class LMI:
 
         return dists, Is[indices_to_keep], query_idx
 
+    def _split_bucket(self, bucket: int) -> None:
+        logger.warning(f"Splitting bucket {bucket} with {len(self.bucket_data[bucket])} samples")
+
+        data = self.bucket_data[bucket]
+        ids = self.bucket_data_ids[bucket]
+
+        y = self._run_kmeans(2, self.dimensionality, data)
+
+        new_bucket = self.n_buckets
+
+        split_existing = (y == 0)
+        split_new = ~split_existing
+
+        self.bucket_data[bucket] = data[split_existing]
+        self.bucket_data_ids[bucket] = ids[split_existing]
+        self.bucket_data[new_bucket] = data[split_new]
+        self.bucket_data_ids[new_bucket] = ids[split_new]
+
+        self.n_buckets += 1
+        self.model.expand_to(self.n_buckets)
+
     @utils.measure_runtime
     def search(self, queries: Tensor, k: int, nprobe: int = 100) -> tuple[np.ndarray, np.ndarray]:
         predicted_bucket_ids = self._predict(queries, nprobe)
@@ -338,7 +359,7 @@ class LMI:
     def get_bucket_sizes(self) -> str:
         result = str()
         for bucket in range(self.n_buckets):
-            result += f"Bucket {bucket}: {int(self.bucket_data_ids[bucket].shape[0])} samples.\n"
+            result += f'Bucket {bucket}: {int(self.bucket_data_ids[bucket].shape[0])} samples\n'
         return result
 
 class BucketInsertionStats:
@@ -346,14 +367,14 @@ class BucketInsertionStats:
         self.stats = {bucket: 0 for bucket in range(n_buckets)}
 
     def insert_into(self, bucket: int) -> None:
-        logger.debug(f'Inserting into bucket {bucket}.')
+        logger.debug(f'Inserting into bucket {bucket}')
         self.stats[bucket] += 1
 
     def __str__(self) -> str:
         result = str()
         for bucket, inserted in self.stats.items():
             if inserted >= 1:
-                result += f"Bucket {bucket}: {inserted} insertions.\n"
+                result += f'Bucket {bucket}: {inserted} insertions\n'
         return result
 
 
@@ -361,9 +382,9 @@ def plot_recalls(recalls, nprobe, plot_every=1):
     x, y = zip(*recalls)
     plt.plot(x[::plot_every], y[::plot_every])
     plt.axhline(0.9, linestyle='--', color='red', label='90% Recall Target')
-    plt.xlabel("Number of Insertions")
-    plt.ylabel(f"Recall After nprobe={nprobe}")
-    plt.title("Recall During Naive Inserts")
+    plt.xlabel('Number of Insertions')
+    plt.ylabel(f'Recall After nprobe={nprobe}')
+    plt.title('Recall During Naive Inserts')
     plt.grid(True)
     plt.legend()
     plt.tight_layout()
@@ -389,7 +410,7 @@ def task1(
     queries = utils.load_queries()
 
     # Naive insertion - Experiment
-    true_I = eval.get_groundtruth(size="300K")
+    true_I = eval.get_groundtruth(size='300K')
     recalls = []
     search_every = 10
     k = 10
