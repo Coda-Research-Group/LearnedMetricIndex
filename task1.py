@@ -156,13 +156,13 @@ class LMI:
 
         return dists, Is[indices_to_keep], query_idx
 
-    def _split_bucket(self, bucket: int) -> None:
+    def _split_bucket(self, bucket: int) -> int:
         logger.warning(f"Splitting bucket {bucket} with {len(self.bucket_data[bucket])} samples")
 
         data = self.bucket_data[bucket]
         ids = self.bucket_data_ids[bucket]
 
-        y = self._run_kmeans(2, self.dimensionality, data)
+        y = LMI._run_kmeans(2, self.dimensionality, data)
 
         new_bucket = self.n_buckets
 
@@ -176,6 +176,8 @@ class LMI:
 
         self.n_buckets += 1
         self.model.expand_to(self.n_buckets)
+
+        return new_bucket
 
     @utils.measure_runtime
     def search(self, queries: Tensor, k: int, nprobe: int = 100) -> tuple[np.ndarray, np.ndarray]:
@@ -356,6 +358,10 @@ class LMI:
             self.bucket_data[bucket] = torch.cat([self.bucket_data[bucket], vector], dim=0)
             self.bucket_data_ids[bucket] = torch.cat([self.bucket_data_ids[bucket], new_ids[i : i + 1]], dim=0)
 
+            if len(self.bucket_data[bucket]) > self._bucket_threshold:
+                new_bucket = self._split_bucket(bucket)
+                stats.extend_with(new_bucket)
+
     def get_bucket_sizes(self) -> str:
         result = str()
         for bucket in range(self.n_buckets):
@@ -369,6 +375,10 @@ class BucketInsertionStats:
     def insert_into(self, bucket: int) -> None:
         logger.debug(f'Inserting into bucket {bucket}')
         self.stats[bucket] += 1
+
+    def extend_with(self, bucket: int):
+        if bucket not in self.stats:
+            self.stats[bucket] = 0
 
     def __str__(self) -> str:
         result = str()
