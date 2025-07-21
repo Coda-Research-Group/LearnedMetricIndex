@@ -52,17 +52,18 @@ class MLP(Module):
 
     def expand_to(self, n_buckets: int) -> None:
         old_classifier: Linear = self.layers[-1]
-        current_classes = old_classifier.out_features
+        n_current_buckets = old_classifier.out_features
 
-        if n_buckets <= current_classes:
+        if n_buckets <= n_current_buckets:
             return
 
         logger.debug(f'Expanding classifier to {n_buckets} buckets')
 
         new_classifier = Linear(old_classifier.in_features, n_buckets)
         with torch.no_grad():
-            new_classifier.weight[:current_classes] = old_classifier.weight[:current_classes]
-            new_classifier.bias[:current_classes] = old_classifier.bias[:current_classes]
+            new_classifier.weight[:n_current_buckets] = old_classifier.weight[:n_current_buckets]
+            new_classifier.bias[:n_current_buckets] = old_classifier.bias[:n_current_buckets]
+
         self.layers[-1] = new_classifier
 
 
@@ -78,7 +79,7 @@ class LMIDataset(Dataset):
         return self.X[index], self.y[index]
 
 
-class LMI:
+class DynamicLMI:
     def __init__(self, n_buckets: int, data_dimensionality: int, model: MLP, replay_size: int):
         self.n_buckets: int = n_buckets
         """Number of buckets."""
@@ -130,8 +131,7 @@ class LMI:
     def _retrain_model(self, affected_buckets: list[int]) -> None:
         assert self.model is not None, 'Model is not trained yet.'
 
-        X = []
-        y = []
+        X, y = list(), list()
 
         for bucket_id in affected_buckets:
             data = self.bucket_data[bucket_id]
@@ -139,8 +139,7 @@ class LMI:
             X.append(data)
             y.append(labels)
 
-        X_replay = []
-        y_replay = []
+        X_replay, y_replay = list(), list()
 
         per_bucket = self._replay_size // (self.n_buckets - 2)
 
@@ -164,7 +163,7 @@ class LMI:
 
         logger.debug(f'Retraining model with affected buckets {affected_buckets}')
 
-        LMI._train_model(
+        DynamicLMI._train_model(
             model=self.model,
             X=X_train,
             y=y_train,
@@ -212,7 +211,7 @@ class LMI:
         data = self.bucket_data[bucket]
         ids = self.bucket_data_ids[bucket]
 
-        y = LMI._run_kmeans(2, self.dimensionality, data)
+        y = DynamicLMI._run_kmeans(2, self.dimensionality, data)
 
         new_bucket = self.n_buckets
 
@@ -366,21 +365,21 @@ class LMI:
         n_buckets: int,
         chunk_size: int,
         replay_size: int,
-    ) -> LMI:
+    ) -> DynamicLMI:
         n_data, data_dim = utils.get_dataset_shape(dataset)
         X_train = utils.sample_train_subset(dataset, n_data, data_dim, sample_size, chunk_size)
 
         logger.debug(f'Training on {X_train.shape[0]} subset from {n_data} dataset')
 
-        y = LMI._run_kmeans(n_buckets, data_dim, X_train)
+        y = DynamicLMI._run_kmeans(n_buckets, data_dim, X_train)
 
         nn = MLP(data_dim, n_buckets)
-        LMI._train_model(nn, X_train, y, epochs, lr)
+        DynamicLMI._train_model(nn, X_train, y, epochs, lr)
 
         del X_train
         gc.collect()
 
-        lmi = LMI(n_buckets, data_dim, nn, replay_size)
+        lmi = DynamicLMI(n_buckets, data_dim, nn, replay_size)
 
         # Store the vectors and their IDs in the corresponding buckets
         lmi._create_buckets(dataset, n_data, chunk_size)
@@ -467,7 +466,7 @@ def task1(
 
     n_buckets = int(alpha * sqrt(utils.get_dataset_size(dataset)))
 
-    lmi = LMI.create(dataset, epochs, lr, sample_size, n_buckets, chunk_size, replay_size)
+    lmi = DynamicLMI.create(dataset, epochs, lr, sample_size, n_buckets, chunk_size, replay_size)
     logger.debug(f'Bucket sizes before insert:\n{lmi.get_bucket_sizes()}')
 
     queries = utils.load_queries()
