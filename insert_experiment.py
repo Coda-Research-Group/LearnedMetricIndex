@@ -23,7 +23,7 @@ from loguru import logger
 from torch import Tensor
 from torch.nn import CrossEntropyLoss, Linear, Module, ReLU, Sequential
 from torch.optim import Adam
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import ConcatDataset, DataLoader, Dataset
 from tqdm import tqdm
 
 import eval
@@ -67,17 +67,17 @@ class MLP(Module):
         self.layers[-1] = new_classifier
 
 
-class LMIReplayDataset(Dataset):
-    def __init__(self, buckets: dict[int, Tensor], refs: list[tuple[int, int]]):
+class LMIReferenceDataset(Dataset):
+    def __init__(self, buckets: dict[int, Tensor], references: list[tuple[int, int]]):
         self.buckets = buckets
-        self.refs = refs  # [(bucket_id, data_idx), ...]
-        self.labels = torch.tensor([b for b, _ in refs], dtype=torch.long)
+        self.references = references  # [(bucket_id, data_idx), ...]
+        self.labels = torch.tensor([b for b, _ in references], dtype=torch.long)
 
     def __len__(self) -> int:
-        return len(self.refs)
+        return len(self.references)
 
     def __getitem__(self, index: int) -> tuple[Tensor, Tensor]:
-        bucket_id, data_index = self.refs[index]
+        bucket_id, data_index = self.references[index]
         return self.buckets[bucket_id][data_index], self.labels[index]
 
 
@@ -94,7 +94,9 @@ class LMIDataset(Dataset):
 
 
 class DynamicLMI:
-    def __init__(self, n_buckets: int, data_dimensionality: int, model: MLP, replay_size: int):
+    def __init__(self, alpha: float, n_buckets: int, data_dimensionality: int, model: MLP, replay_size: int):
+        self._alpha: float = alpha
+        """Multiplier used in the calculation of the number of buckets."""
         self.n_buckets: int = n_buckets
         """Number of buckets."""
         self.dimensionality: int = data_dimensionality
@@ -107,8 +109,6 @@ class DynamicLMI:
         """Mapping from bucket ID to the indices of the data in the bucket."""
         self._next_id: int = 0
         """Keeps track of the next available unique data ID to be inserted."""
-        self._bucket_threshold: int = 0
-        """Maximum possible number of samples in a bucket before split."""
         self._replay_size: int = replay_size
         """Maximum amount of old data to use when retraining the model."""
 
@@ -143,14 +143,15 @@ class DynamicLMI:
     def _retrain_model(self, affected_buckets: list[int]) -> None:
         assert self.model is not None, 'Model is not trained yet.'
 
-        # Load all the data from affected buckets
-        replay_refs = []
+        # Load all the data from affected buckets (to account for new bucket and modified split bucket)
+        affected_references = list()
         for bucket_id in affected_buckets:
             n_samples = self.bucket_data[bucket_id].shape[0]
-            replay_refs.extend([(bucket_id, i) for i in range(n_samples)])
+            affected_references.extend([(bucket_id, i) for i in range(n_samples)])
 
         per_bucket = self._replay_size // max(1, (self.n_buckets - len(affected_buckets)))
 
+        replay_references = list()
         for bucket_id in range(self.n_buckets):
             if bucket_id in affected_buckets:
                 continue
@@ -159,12 +160,16 @@ class DynamicLMI:
                 continue
 
             selected_indices = utils.herd_from(data, per_bucket)
-            replay_refs.extend([(bucket_id, i) for i in selected_indices])
+            replay_references.extend([(bucket_id, i) for i in selected_indices])
 
         logger.debug(f'Retraining model with affected buckets {affected_buckets}')
 
+        affected_dataset = LMIReferenceDataset(self.bucket_data, affected_references)
+        replay_dataset = LMIReferenceDataset(self.bucket_data, replay_references)
+        train_dataset = ConcatDataset([affected_dataset, replay_dataset])
+
         train_loader = DataLoader(
-            dataset=LMIReplayDataset(self.bucket_data, replay_refs),
+            dataset=train_dataset,
             batch_size=256,
             shuffle=True,
         )
@@ -175,6 +180,9 @@ class DynamicLMI:
             epochs=5,
             lr=0.00098,
         )
+
+        del affected_dataset, replay_dataset, train_dataset, train_loader
+        gc.collect()
 
     def _visit_bucket(self, bucket: int, query: Tensor, k: int) -> tuple[Tensor, Tensor]:
         if len(self.bucket_data[bucket]) == 0:
@@ -343,12 +351,6 @@ class DynamicLMI:
 
         return offsets
 
-    def _set_threshold(self) -> None:
-        total = 0
-        for bucket in range(self.n_buckets):
-            total += int(self.bucket_data_ids[bucket].shape[0])
-        self._bucket_threshold = total // self.n_buckets * 2
-
     @utils.measure_runtime
     def _create_buckets(self, dataset: Path, n_data: int, chunk_size: int) -> None:
         logger.debug('Started bucket creation')
@@ -372,9 +374,8 @@ class DynamicLMI:
             self._chunk_sort(dataset, classes, i, offsets, chunk_size)
         gc.collect()
 
-        # After creating and filling up all the buckets, set the next available id and threshold
+        # After creating and filling up all the buckets, set the next available id
         self._next_id = sum(len(ids) for ids in self.bucket_data_ids.values())
-        self._set_threshold()
 
     @utils.measure_runtime
     @staticmethod
@@ -396,6 +397,7 @@ class DynamicLMI:
         epochs: int,
         lr: float,
         sample_size: int,
+        alpha: float,
         n_buckets: int,
         chunk_size: int,
         replay_size: int,
@@ -414,12 +416,16 @@ class DynamicLMI:
         del X_train
         gc.collect()
 
-        lmi = DynamicLMI(n_buckets, data_dim, nn, replay_size)
+        lmi = DynamicLMI(alpha, n_buckets, data_dim, nn, replay_size)
 
         # Store the vectors and their IDs in the corresponding buckets
         lmi._create_buckets(dataset, n_data, chunk_size)
 
         return lmi
+
+    def _get_largest_bucket(self) -> int:
+        # Bucket data ids are always expected to have at least one entry
+        return max(self.bucket_data_ids.items(), key=lambda item: len(item[1]))[0]
 
     @utils.measure_runtime
     def insert(self, data: Tensor, stats: BucketInsertionStats) -> None:
@@ -436,6 +442,10 @@ class DynamicLMI:
         new_ids = torch.arange(self._next_id, self._next_id + n_data, dtype=torch.int32)
         self._next_id += n_data
 
+        target_buckets = int(self._alpha * sqrt(self._next_id))
+        splits_needed = target_buckets - self.n_buckets
+        assert splits_needed >= 0, "Splits needed cannot be negative."
+
         for i in range(n_data):
             vector = data[i : i + 1].to(torch.float16)
             bucket = int(predicted_bucket_ids[i].item())
@@ -444,11 +454,18 @@ class DynamicLMI:
             self.bucket_data[bucket] = torch.cat([self.bucket_data[bucket], vector], dim=0)
             self.bucket_data_ids[bucket] = torch.cat([self.bucket_data_ids[bucket], new_ids[i : i + 1]], dim=0)
 
-            if len(self.bucket_data[bucket]) > self._bucket_threshold:
-                new_bucket = self._split_bucket(bucket)
-                stats.extend_with(new_bucket)
-                self.model.expand_to(self.n_buckets)
-                self._retrain_model(affected_buckets=[bucket, new_bucket])
+        affected_buckets = set()  # Some buckets may split multiple times
+
+        for _ in range(splits_needed):
+            bucket = self._get_largest_bucket()
+            new_bucket = self._split_bucket(bucket)
+            affected_buckets.update([bucket, new_bucket])
+            stats.extend_with(new_bucket)
+
+        # Retrain once, after all the splits were done
+        if splits_needed > 0:
+            self.model.expand_to(self.n_buckets)
+            self._retrain_model(affected_buckets=list(affected_buckets))
 
     def get_bucket_sizes(self) -> str:
         result = str()
@@ -476,13 +493,13 @@ class BucketInsertionStats:
         return result
 
 
-def plot_recalls(recalls, nprobe, plot_every=1):
+def plot_recalls(recalls, n_candidates, plot_every=1):
     x, y = zip(*recalls)
     plt.plot(x[::plot_every], y[::plot_every])
     plt.axhline(0.9, linestyle='--', color='red', label='90% Recall Target')
     plt.xlabel('Number of Insertions')
-    plt.ylabel(f'Recall After nprobe={nprobe}')
-    plt.title('Recall During Naive Inserts')
+    plt.ylabel(f'Recall After n_candidates={n_candidates}')
+    plt.title('Recall During Inserts')
     plt.grid(True)
     plt.legend()
     plt.tight_layout()
@@ -503,12 +520,11 @@ def insert_experiment(
 
     n_buckets = int(alpha * sqrt(utils.get_dataset_size(dataset)))
 
-    lmi = DynamicLMI.create(dataset, epochs, lr, sample_size, n_buckets, chunk_size, replay_size)
+    lmi = DynamicLMI.create(dataset, epochs, lr, sample_size, alpha, n_buckets, chunk_size, replay_size)
     logger.debug(f'Bucket sizes before insert:\n{lmi.get_bucket_sizes()}')
 
     queries = utils.load_queries()
 
-    # Naive insertion - Experiment
     true_I = eval.get_groundtruth(size='300K')
     recalls = []
     search_every = 10
