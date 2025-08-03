@@ -187,16 +187,16 @@ class DynamicLMI:
     def _visit_buckets(
         self,
         k: int,
-        predicted_buckets: Tensor,
+        predicted_buckets: list[int],
         query: Tensor,
         query_idx: int,
-        nprobe: int,
     ) -> tuple[Tensor, Tensor, int]:
-        Is = torch.empty((k * nprobe,), dtype=torch.int32)
-        Ds = torch.empty((k * nprobe,))
+        n_buckets = len(predicted_buckets)
+        Is = torch.empty((k * n_buckets,), dtype=torch.int32)
+        Ds = torch.empty((k * n_buckets,))
 
-        for nth_bucket in range(nprobe):
-            D, I = self._visit_bucket(int(predicted_buckets[nth_bucket].item()), query, k)
+        for nth_bucket in range(n_buckets):
+            D, I = self._visit_bucket(predicted_buckets[nth_bucket], query, k)
 
             start, stop = nth_bucket * k, (nth_bucket + 1) * k
             Ds[start:stop], Is[start:stop] = D, I
@@ -228,8 +228,8 @@ class DynamicLMI:
         return new_bucket
 
     @utils.measure_runtime
-    def search(self, queries: Tensor, k: int, nprobe: int = 100) -> tuple[np.ndarray, np.ndarray]:
-        predicted_bucket_ids = self._predict(queries, nprobe)
+    def search(self, queries: Tensor, k: int, n_candidates: int = 1_000) -> tuple[np.ndarray, np.ndarray]:
+        predicted_bucket_ids = self._predict(queries, n_candidates)
         n_queries = queries.shape[0]
         D = np.empty((n_queries, k), dtype=np.float32)
         I = np.empty((n_queries, k), dtype=np.int32)
@@ -239,7 +239,7 @@ class DynamicLMI:
 
         with ThreadPoolExecutor(max_workers=9) as executor:
             results = executor.map(
-                lambda i: self._visit_buckets(k, predicted_bucket_ids[i], queries[i : i + 1], i, nprobe),
+                lambda i: self._visit_buckets(k, predicted_bucket_ids[i], queries[i : i + 1], i),
                 range(n_queries),
             )
             for dists, nns, query_id in tqdm(results, total=n_queries):
@@ -249,7 +249,7 @@ class DynamicLMI:
         return D, I
 
     @utils.measure_runtime
-    def _predict(self, X: Tensor, top_k: int) -> Tensor:
+    def _predict_top_bucket(self, X: Tensor) -> Tensor:
         assert self.model is not None, 'Model is not trained yet.'
 
         self.model.eval()
@@ -257,7 +257,36 @@ class DynamicLMI:
         with torch.no_grad():
             logits = self.model(X)
 
-        return logits.topk(top_k)[1]
+        return logits.topk(1)[1]
+
+    @utils.measure_runtime
+    def _predict(self, X: Tensor, n_candidates: int) -> list[list[int]]:
+        assert self.model is not None, 'Model is not trained yet.'
+
+        self.model.eval()
+
+        with torch.no_grad():
+            logits = self.model(X)
+            predicted_buckets: list[list[int]] = list()
+
+            for row in logits:
+                _, bucket_indices = torch.sort(row, descending=True)
+
+                buckets = list()
+                candidates = 0
+
+                for nth_bucket in range(len(bucket_indices)):
+                    bucket = int(bucket_indices[nth_bucket].item())
+
+                    buckets.append(bucket)
+                    candidates += self.bucket_data_ids[bucket].shape[0]
+
+                    if candidates >= n_candidates:
+                        break
+
+                predicted_buckets.append(buckets)
+
+        return predicted_buckets
 
     def _bucket_init(self, classes: Tensor, bucket: int) -> None:
         indices = torch.where(classes == bucket)[0]
@@ -272,7 +301,7 @@ class DynamicLMI:
         start, stop = chunk_i * chunk_size, (chunk_i + 1) * chunk_size
 
         chunk = utils.load_chunk(dataset, start, stop)
-        predicted_bucket_ids = self._predict(chunk.to(torch.float32), 1).reshape(-1)
+        predicted_bucket_ids = self._predict_top_bucket(chunk.to(torch.float32)).reshape(-1)
         del chunk
 
         return predicted_bucket_ids, start, stop
@@ -387,13 +416,15 @@ class DynamicLMI:
         return lmi
 
     @utils.measure_runtime
-    def naive_insert(self, data: Tensor, stats: BucketInsertionStats) -> None:
+    def insert(self, data: Tensor, stats: BucketInsertionStats) -> None:
         # Ensure batched input in case of a single data point
         if data.dim() == 1:
             data = data.unsqueeze(0)
 
         data = utils.ensure_float32(data).cpu()
-        predicted_bucket_ids = self._predict(data, top_k=1).reshape(-1)
+
+        # [[3], [1], [5]] -> [3, 1, 5]
+        predicted_bucket_ids = self._predict_top_bucket(data).reshape(-1)
 
         n_data = data.shape[0]
         new_ids = torch.arange(self._next_id, self._next_id + n_data, dtype=torch.int32)
@@ -452,13 +483,13 @@ def plot_recalls(recalls, nprobe, plot_every=1):
     plt.show()
 
 
-def task1(
+def insert_experiment(
     dataset_size: str,
     epochs: int,
     lr: float,
     sample_size: int,
     alpha: float,
-    nprobe: int,
+    n_candidates: int,
     chunk_size: int,
     replay_size: int,
 ) -> None:
@@ -476,16 +507,17 @@ def task1(
     recalls = []
     search_every = 10
     k = 10
+    assert k <= n_candidates, 'Number of k neighbors is larger than the candidates to search for.'
 
     insertion_stats = BucketInsertionStats(n_buckets=n_buckets)
 
     for i in range(queries.shape[0]):
-        lmi.naive_insert(queries[i], insertion_stats)  # insert one vector at a time
+        lmi.insert(queries[i], insertion_stats)  # insert one vector at a time
 
         if (i + 1) % search_every == 0:
             # Run search on all queries seen so far
             q = queries[: i + 1]
-            _, I = lmi.search(q, k=k, nprobe=nprobe)
+            _, I = lmi.search(q, k=k, n_candidates=n_candidates)
 
             # Compare predicted indices to ground truth
             gt = true_I[: i + 1, :k]
@@ -496,22 +528,20 @@ def task1(
     logger.debug(f'Bucket insertions:\n{insertion_stats}')
     logger.debug(f'Bucket sizes after insert:\n{lmi.get_bucket_sizes()}')
 
-    # Plot recalls after insertions
-    # plot_every = queries.shape[0] // search_every // 25
-    plot_recalls(recalls, nprobe)
+    plot_recalls(recalls, n_candidates)
 
 
-# python task1.py --dataset-size 300K --sample-size 100000 --chunk-size 100000 --nprobe 1 &>task1.log
+# python insert_experiment.py --dataset-size 300K --sample-size 100000 --chunk-size 100000 --n-candidates 500 &>insert_experiment.log
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--epochs', type=int, default=15)
     parser.add_argument('--lr', type=float, default=0.00098)
     parser.add_argument('--sample-size', type=int, default=1_000_000)
     parser.add_argument('--alpha', type=float, default=1.0)
-    parser.add_argument('--nprobe', type=int, default=5)
+    parser.add_argument('--n-candidates', type=int, default=1_000)  # minimum candidates to load during search
     parser.add_argument('--dataset-size', type=str, default='100M')
     parser.add_argument('--chunk-size', type=int, default=1_000_000)
     parser.add_argument('--replay-size', type=int, default=5_000)
     args = parser.parse_args()
 
-    task1(**vars(args))
+    insert_experiment(**vars(args))
