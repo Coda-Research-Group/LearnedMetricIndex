@@ -142,17 +142,15 @@ def compute_class_mean(X: Tensor) -> Tensor:
 
 
 @measure_runtime
-def herd_from(X: Tensor, y: Tensor, size: int) -> tuple[Tensor, Tensor]:
+def herd_from(X: Tensor, size: int) -> list[int]:
     """
     An implementation of herding algorithm described in Eq.4 in the article
     Class-Incremental Learning: A Survey (https://arxiv.org/pdf/2302.03648).
-    Modified for herding from one class.
+    Modified for herding from one class and to return references instead of
+    actual data.
     """
-
-    assert len(torch.unique(y)) == 1, "Expected only a single class in y."
-
-    class_mean = compute_class_mean(X)
-    selected_samples = []
+    class_mean = X.mean(dim=0)
+    selected_indices = []
     running_sum = torch.zeros_like(class_mean)
 
     available_mask = torch.ones(len(X), dtype=torch.bool, device=X.device)
@@ -162,19 +160,11 @@ def herd_from(X: Tensor, y: Tensor, size: int) -> tuple[Tensor, Tensor]:
         candidate_means = (available_samples + running_sum) / k
         distances = torch.linalg.vector_norm(class_mean - candidate_means, dim=1)
 
-        closest_idx = torch.argmin(distances).item()
-        selected_sample = available_samples[closest_idx]
-        selected_samples.append(selected_sample)
-        running_sum += selected_sample
+        closest_idx_local = torch.argmin(distances).item()  # Index in available data
+        global_idx = torch.where(available_mask)[0][closest_idx_local].item()  # Local index converted to index in original data
 
-        original_idx = torch.where(available_mask)[0][closest_idx]
-        available_mask[original_idx] = False
+        selected_indices.append(global_idx)
+        running_sum += X[global_idx]
+        available_mask[global_idx] = False
 
-    if selected_samples:
-        X_selected = torch.stack(selected_samples)
-        y_selected = y[:X_selected.shape[0]]
-    else:
-        X_selected = torch.empty((0, X.shape[1]), device=X.device)
-        y_selected = torch.empty((0,), dtype=y.dtype, device=y.device)
-
-    return X_selected, y_selected
+    return selected_indices

@@ -67,6 +67,20 @@ class MLP(Module):
         self.layers[-1] = new_classifier
 
 
+class LMIReplayDataset(Dataset):
+    def __init__(self, buckets: dict[int, Tensor], refs: list[tuple[int, int]]):
+        self.buckets = buckets
+        self.refs = refs  # [(bucket_id, data_idx), ...]
+        self.labels = torch.tensor([b for b, _ in refs], dtype=torch.long)
+
+    def __len__(self) -> int:
+        return len(self.refs)
+
+    def __getitem__(self, index: int) -> tuple[Tensor, Tensor]:
+        bucket_id, data_index = self.refs[index]
+        return self.buckets[bucket_id][data_index], self.labels[index]
+
+
 class LMIDataset(Dataset):
     def __init__(self, X: Tensor, y: Tensor):
         self.X = X
@@ -102,12 +116,10 @@ class DynamicLMI:
     @staticmethod
     def _train_model(
         model: MLP,
-        X: Tensor,
-        y: Tensor,
+        train_loader: DataLoader,
         epochs: int,
         lr: float,
     ) -> None:
-        train_loader = DataLoader(dataset=LMIDataset(X, y), batch_size=256, shuffle=True)
         loss_fn = CrossEntropyLoss()
         optimizer = Adam(params=model.parameters(), lr=lr)
 
@@ -131,42 +143,35 @@ class DynamicLMI:
     def _retrain_model(self, affected_buckets: list[int]) -> None:
         assert self.model is not None, 'Model is not trained yet.'
 
-        X, y = list(), list()
-
+        # Load all the data from affected buckets
+        replay_refs = []
         for bucket_id in affected_buckets:
-            data = self.bucket_data[bucket_id]
-            labels = torch.full((len(data),), bucket_id, dtype=torch.long)
-            X.append(data)
-            y.append(labels)
+            n_samples = self.bucket_data[bucket_id].shape[0]
+            replay_refs.extend([(bucket_id, i) for i in range(n_samples)])
 
-        X_replay, y_replay = list(), list()
-
-        per_bucket = self._replay_size // (self.n_buckets - 2)
+        per_bucket = self._replay_size // max(1, (self.n_buckets - len(affected_buckets)))
 
         for bucket_id in range(self.n_buckets):
             if bucket_id in affected_buckets:
                 continue
-
             data = self.bucket_data[bucket_id]
             if data.shape[0] == 0:
                 continue
-            labels = torch.full((len(data),), bucket_id, dtype=torch.long)
 
-            X_bucket, y_bucket = utils.herd_from(data, labels, per_bucket)
-
-            X_replay.append(X_bucket)
-            y_replay.append(y_bucket)
-
-        X, y = torch.cat(X), torch.cat(y)
-        X_replay, y_replay = torch.cat(X_replay), torch.cat(y_replay)
-        X_train, y_train = torch.cat([X, X_replay]), torch.cat([y, y_replay])
+            selected_indices = utils.herd_from(data, per_bucket)
+            replay_refs.extend([(bucket_id, i) for i in selected_indices])
 
         logger.debug(f'Retraining model with affected buckets {affected_buckets}')
 
+        train_loader = DataLoader(
+            dataset=LMIReplayDataset(self.bucket_data, replay_refs),
+            batch_size=256,
+            shuffle=True,
+        )
+
         DynamicLMI._train_model(
             model=self.model,
-            X=X_train,
-            y=y_train,
+            train_loader=train_loader,
             epochs=5,
             lr=0.00098,
         )
@@ -403,7 +408,8 @@ class DynamicLMI:
         y = DynamicLMI._run_kmeans(n_buckets, data_dim, X_train)
 
         nn = MLP(data_dim, n_buckets)
-        DynamicLMI._train_model(nn, X_train, y, epochs, lr)
+        train_loader = DataLoader(dataset=LMIDataset(X_train, y), batch_size=256, shuffle=True)
+        DynamicLMI._train_model(nn, train_loader, epochs, lr)
 
         del X_train
         gc.collect()
