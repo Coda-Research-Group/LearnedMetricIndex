@@ -73,8 +73,10 @@ if __name__ == '__main__':
         'encdatabasetime',
         'encqueriestime',
         'buildtime',
+        'inserttime',
         'querytime',
         'params',
+        'candidates',
         'recall',
     ]
 

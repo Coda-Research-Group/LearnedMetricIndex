@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
 import h5py
+import numpy
 import torch
 import torch.utils
 from loguru import logger
@@ -43,8 +44,10 @@ def store_results(  # noqa: PLR0913
     encdatabasetime: float,
     encqueriestime: float,
     buildtime: float,
+    inserttime: float,
     querytime: float,
     params: str,
+    candidates: int,
     size: str,
 ) -> None:
     Path.mkdir(dst.parent, parents=True, exist_ok=True)
@@ -54,9 +57,11 @@ def store_results(  # noqa: PLR0913
     f.attrs['encdatabasetime'] = encdatabasetime
     f.attrs['encqueriestime'] = encqueriestime
     f.attrs['buildtime'] = buildtime
+    f.attrs['inserttime'] = inserttime
     f.attrs['querytime'] = querytime
     f.attrs['size'] = size
     f.attrs['params'] = params
+    f.attrs['candidates'] = candidates
     f.create_dataset('knns', I.shape, dtype=I.dtype)[:] = I
     f.create_dataset('dists', D.shape, dtype=D.dtype)[:] = D
     f.close()
@@ -72,6 +77,10 @@ def get_dataset_size(dataset: Path) -> int:
 
 def ensure_float32(data: Tensor) -> Tensor:
     return data.to(torch.float32)  # type: ignore
+
+
+def load_dataset(dataset: Path) -> Tensor:
+    return torch.from_numpy(h5py.File(dataset, 'r')['emb'][:])
 
 
 def load_queries() -> Tensor:
@@ -141,7 +150,6 @@ def compute_class_mean(X: Tensor) -> Tensor:
     return X.mean(dim=0)
 
 
-@measure_runtime
 def herd_from(X: Tensor, size: int) -> list[int]:
     """
     An implementation of herding algorithm described in Eq.4 in the article
@@ -168,3 +176,32 @@ def herd_from(X: Tensor, size: int) -> list[int]:
         available_mask[global_idx] = False
 
     return selected_indices
+
+
+def create_task_h5py(dataset: Path, nth_task: int, n_tasks: int) -> Path:
+    assert nth_task <= n_tasks - 1, "nth_task must be at most n_tasks - 1"
+
+    n_data = get_dataset_size(dataset)
+
+    task_size = n_data // n_tasks
+    remainder = n_data % n_tasks
+
+    start = nth_task * task_size
+    stop = start + task_size + (remainder if nth_task == n_tasks - 1 else 0)  # Ensure the remainder is added to the last task
+
+    logger.debug(f"Creating h5py file for task {nth_task}")
+
+    with h5py.File(dataset, 'r') as input_file:
+        embeddings = input_file['emb'][start:stop]
+
+    output_path = Path("data2024") / f"tmp-task-{nth_task}.h5"
+    with h5py.File(output_path, 'w') as output_file:
+        output_file.create_dataset('emb', data=embeddings, dtype=numpy.float16)
+
+    logger.debug(f"Temporary dataset for task {nth_task} saved to {output_path}")
+    return output_path
+
+
+def delete_task_h5py(task_dataset: Path) -> None:
+    task_dataset.unlink()
+    logger.debug(f"Temporary dataset {task_dataset} was removed")

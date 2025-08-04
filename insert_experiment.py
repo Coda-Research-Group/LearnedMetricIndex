@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import os
 
-from matplotlib import pyplot as plt
-
 os.environ['MKL_NUM_THREADS'] = '27'
 os.environ['OMP_NUM_THREADS'] = '27'
 os.environ['OMP_DYNAMIC'] = 'FALSE'
@@ -11,6 +9,7 @@ os.environ['MKL_DYNAMIC'] = 'FALSE'
 
 import argparse
 import gc
+import time
 from concurrent.futures import ThreadPoolExecutor
 from math import ceil, sqrt
 from pathlib import Path
@@ -26,7 +25,6 @@ from torch.optim import Adam
 from torch.utils.data import ConcatDataset, DataLoader, Dataset
 from tqdm import tqdm
 
-import eval
 import utils
 
 torch.set_num_threads(27)
@@ -219,8 +217,6 @@ class DynamicLMI:
         return dists, Is[indices_to_keep], query_idx
 
     def _split_bucket(self, bucket: int) -> int:
-        logger.debug(f'Splitting bucket {bucket} with {len(self.bucket_data[bucket])} samples')
-
         data = self.bucket_data[bucket]
         ids = self.bucket_data_ids[bucket]
 
@@ -428,7 +424,11 @@ class DynamicLMI:
         return max(self.bucket_data_ids.items(), key=lambda item: len(item[1]))[0]
 
     @utils.measure_runtime
-    def insert(self, data: Tensor, stats: BucketInsertionStats) -> None:
+    def insert(
+        self,
+        data: Tensor,
+        # stats: BucketInsertionStats,
+    ) -> None:
         # Ensure batched input in case of a single data point
         if data.dim() == 1:
             data = data.unsqueeze(0)
@@ -449,7 +449,7 @@ class DynamicLMI:
         for i in range(n_data):
             vector = data[i : i + 1].to(torch.float16)
             bucket = int(predicted_bucket_ids[i].item())
-            stats.insert_into(bucket)
+            # stats.insert_into(bucket)
 
             self.bucket_data[bucket] = torch.cat([self.bucket_data[bucket], vector], dim=0)
             self.bucket_data_ids[bucket] = torch.cat([self.bucket_data_ids[bucket], new_ids[i : i + 1]], dim=0)
@@ -460,50 +460,39 @@ class DynamicLMI:
             bucket = self._get_largest_bucket()
             new_bucket = self._split_bucket(bucket)
             affected_buckets.update([bucket, new_bucket])
-            stats.extend_with(new_bucket)
+            # stats.extend_with(new_bucket)
+
+        logger.debug(f"Performed split on buckets {affected_buckets}")
 
         # Retrain once, after all the splits were done
         if splits_needed > 0:
             self.model.expand_to(self.n_buckets)
             self._retrain_model(affected_buckets=list(affected_buckets))
 
-    def get_bucket_sizes(self) -> str:
-        result = str()
-        for bucket in range(self.n_buckets):
-            result += f'Bucket {bucket}: {int(self.bucket_data_ids[bucket].shape[0])} samples\n'
-        return result
-
-class BucketInsertionStats:
-    def __init__(self, n_buckets: int):
-        self.stats = {bucket: 0 for bucket in range(n_buckets)}
-
-    def insert_into(self, bucket: int) -> None:
-        logger.debug(f'Inserting into bucket {bucket}')
-        self.stats[bucket] += 1
-
-    def extend_with(self, bucket: int):
-        if bucket not in self.stats:
-            self.stats[bucket] = 0
-
-    def __str__(self) -> str:
-        result = str()
-        for bucket, inserted in self.stats.items():
-            if inserted >= 1:
-                result += f'Bucket {bucket}: {inserted} insertions\n'
-        return result
+    # def get_bucket_sizes(self) -> str:
+    #     result = str()
+    #     for bucket in range(self.n_buckets):
+    #         result += f'Bucket {bucket}: {int(self.bucket_data_ids[bucket].shape[0])} samples\n'
+    #     return result
 
 
-def plot_recalls(recalls, n_candidates, plot_every=1):
-    x, y = zip(*recalls)
-    plt.plot(x[::plot_every], y[::plot_every])
-    plt.axhline(0.9, linestyle='--', color='red', label='90% Recall Target')
-    plt.xlabel('Number of Insertions')
-    plt.ylabel(f'Recall After n_candidates={n_candidates}')
-    plt.title('Recall During Inserts')
-    plt.grid(True)
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
+# class BucketInsertionStats:
+#     def __init__(self, n_buckets: int):
+#         self.stats = {bucket: 0 for bucket in range(n_buckets)}
+#
+#     def insert_into(self, bucket: int) -> None:
+#         self.stats[bucket] += 1
+#
+#     def extend_with(self, bucket: int):
+#         if bucket not in self.stats:
+#             self.stats[bucket] = 0
+#
+#     def __str__(self) -> str:
+#         result = str()
+#         for bucket, inserted in self.stats.items():
+#             if inserted >= 1:
+#                 result += f'Bucket {bucket}: {inserted} insertions\n'
+#         return result
 
 
 def insert_experiment(
@@ -511,6 +500,76 @@ def insert_experiment(
     epochs: int,
     lr: float,
     sample_size: int,
+    n_tasks: int,
+    alpha: float,
+    n_candidates: int,
+    chunk_size: int,
+    replay_size: int,
+) -> None:
+    dataset = Path(f'data2024/laion2B-en-clip768v2-n={dataset_size}.h5')
+    initial_task_dataset = utils.create_task_h5py(dataset, 0, n_tasks)
+
+    n_buckets = int(alpha * sqrt(utils.get_dataset_size(initial_task_dataset)))
+
+    start = time.time()
+    lmi = DynamicLMI.create(initial_task_dataset, epochs, lr, sample_size, alpha, n_buckets, chunk_size, replay_size)
+    utils.delete_task_h5py(initial_task_dataset)
+    buildtime = time.time() - start
+
+    # logger.debug(f'Bucket sizes before insert:\n{lmi.get_bucket_sizes()}')
+    # insertion_stats = BucketInsertionStats(n_buckets=n_buckets)
+
+    start = time.time()
+    for nth_task in range(1, n_tasks):
+        task_dataset = utils.create_task_h5py(dataset, nth_task, n_tasks)
+        lmi.insert(
+            utils.load_dataset(task_dataset),
+            # insertion_stats,
+        )  # TODO: Rework to insert in chunks
+        utils.delete_task_h5py(task_dataset)
+    inserttime = time.time() - start
+
+    # logger.debug(f'Bucket insertion stats:\n{insertion_stats}')
+    # logger.debug(f'Bucket sizes after insert:\n{lmi.get_bucket_sizes()}')
+
+    queries = utils.load_queries()
+
+    k = 30
+    assert k <= n_candidates, 'Number of k neighbors is larger than the candidates to search for.'
+
+    candidates_increments = [(i + 1) * n_candidates for i in range(10)]
+
+    for candidates in candidates_increments:
+        start = time.time()
+        D, I = lmi.search(queries, k, candidates)
+        searchtime = time.time() - start
+
+        identifier = f't1-{dataset_size}-epochs={epochs}-lr={lr}-sample={sample_size}-alpha={alpha}-n_tasks={n_tasks}-chunk_size={chunk_size}-n_candidates={candidates}-replay_size={replay_size}'
+        modelingtime, encdatabasetime, encqueriestime = 0.0, 0.0, 0.0
+
+        utils.store_results(
+            Path('result/') / 'insert_experiment' / dataset_size / f'{identifier}.h5',
+            'dlmi',
+            D,
+            I + 1,
+            modelingtime,
+            encdatabasetime,
+            encqueriestime,
+            buildtime,
+            inserttime,
+            searchtime,
+            identifier,
+            candidates,
+            dataset_size,
+        )
+
+
+def static_experiment(
+    dataset_size: str,
+    epochs: int,
+    lr: float,
+    sample_size: int,
+    n_tasks: int,
     alpha: float,
     n_candidates: int,
     chunk_size: int,
@@ -520,50 +579,57 @@ def insert_experiment(
 
     n_buckets = int(alpha * sqrt(utils.get_dataset_size(dataset)))
 
+    start = time.time()
     lmi = DynamicLMI.create(dataset, epochs, lr, sample_size, alpha, n_buckets, chunk_size, replay_size)
-    logger.debug(f'Bucket sizes before insert:\n{lmi.get_bucket_sizes()}')
+    buildtime = time.time() - start
 
     queries = utils.load_queries()
 
-    true_I = eval.get_groundtruth(size='300K')
-    recalls = []
-    search_every = 10
-    k = 10
+    k = 30
     assert k <= n_candidates, 'Number of k neighbors is larger than the candidates to search for.'
 
-    insertion_stats = BucketInsertionStats(n_buckets=n_buckets)
+    candidates_increments = [(i + 1) * n_candidates for i in range(10)]
 
-    for i in range(queries.shape[0]):
-        lmi.insert(queries[i], insertion_stats)  # insert one vector at a time
+    for candidates in candidates_increments:
+        start = time.time()
+        D, I = lmi.search(queries, k, candidates)
+        searchtime = time.time() - start
 
-        if (i + 1) % search_every == 0:
-            # Run search on all queries seen so far
-            q = queries[: i + 1]
-            _, I = lmi.search(q, k=k, n_candidates=n_candidates)
+        identifier = f't1-{dataset_size}-epochs={epochs}-lr={lr}-sample={sample_size}-alpha={alpha}-chunk_size={chunk_size}-n_candidates={candidates}'
+        modelingtime, encdatabasetime, encqueriestime = 0.0, 0.0, 0.0
 
-            # Compare predicted indices to ground truth
-            gt = true_I[: i + 1, :k]
+        utils.store_results(
+            Path('result/') / 'static_experiment' / dataset_size / f'{identifier}.h5',
+            'lmi',
+            D,
+            I + 1,
+            modelingtime,
+            encdatabasetime,
+            encqueriestime,
+            buildtime,
+            0.0,
+            searchtime,
+            identifier,
+            candidates,
+            dataset_size,
+        )
 
-            recall = eval.get_recall(I + 1, gt, k=k)
-            recalls.append((i + 1, recall))
 
-    logger.debug(f'Bucket insertions:\n{insertion_stats}')
-    logger.debug(f'Bucket sizes after insert:\n{lmi.get_bucket_sizes()}')
-
-    plot_recalls(recalls, n_candidates)
-
-
-# python insert_experiment.py --dataset-size 300K --sample-size 100000 --chunk-size 100000 --n-candidates 500 &>insert_experiment.log
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--epochs', type=int, default=15)
     parser.add_argument('--lr', type=float, default=0.00098)
     parser.add_argument('--sample-size', type=int, default=1_000_000)
     parser.add_argument('--alpha', type=float, default=1.0)
+    parser.add_argument('--n-tasks', type=int, default=100)
     parser.add_argument('--n-candidates', type=int, default=1_000)  # minimum candidates to load during search
     parser.add_argument('--dataset-size', type=str, default='100M')
     parser.add_argument('--chunk-size', type=int, default=1_000_000)
     parser.add_argument('--replay-size', type=int, default=5_000)
     args = parser.parse_args()
 
+    # python insert_experiment.py --dataset-size 300K --sample-size 100000 --chunk-size 100000 --n-candidates 500 --n-tasks 2 &>insert_experiment.log
     insert_experiment(**vars(args))
+
+    # python insert_experiment.py --dataset-size 300K --sample-size 100000 --chunk-size 100000 --n-candidates 500 &>static_experiment.log
+    # static_experiment(**vars(args))
