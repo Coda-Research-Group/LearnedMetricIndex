@@ -13,4 +13,7 @@ RUN conda init bash && \
 WORKDIR /app
 COPY . .
 
-ENTRYPOINT ["/bin/bash", "-l", "-c" ]
+# ENTRYPOINT ["/bin/bash", "-l", "-c" ]
+
+# Set default command to keep container running
+CMD ["tail", "-f", "/dev/null"]
