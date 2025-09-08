@@ -19,7 +19,9 @@ See also `.github/workflows/ci.yml`. Note the different parameters for 300K and 
 
 ```shell
 docker build -t sisap24 -f Dockerfile .
-docker run -it --rm sisap24 bash
+docker run -it --rm -v $(pwd)/data:/app/data -v $(pwd)/result:/app/result sisap24 bash
+
+python3 task1.py --dataset-name yi-128-ip
 ```
 
 ### Using Conda

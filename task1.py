@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-import os
-
-os.environ['MKL_NUM_THREADS'] = '27'
-os.environ['OMP_NUM_THREADS'] = '27'
-os.environ['OMP_DYNAMIC'] = 'FALSE'
-os.environ['MKL_DYNAMIC'] = 'FALSE'
-
+# os.environ['MKL_NUM_THREADS'] = '27'
+# os.environ['OMP_NUM_THREADS'] = '27'
+# os.environ['OMP_DYNAMIC'] = 'FALSE'
+# os.environ['MKL_DYNAMIC'] = 'FALSE'
 import argparse
 import gc
+
+# import os
 import time
 from concurrent.futures import ThreadPoolExecutor
-from math import ceil, sqrt
+from math import ceil
 from pathlib import Path
 
 import faiss
@@ -23,14 +22,13 @@ from torch import Tensor
 from torch.nn import CrossEntropyLoss, Linear, ReLU, Sequential
 from torch.optim import Adam
 from torch.utils.data import DataLoader, Dataset
-from tqdm import tqdm
 
 import utils
 
-torch.set_num_threads(27)
-faiss.omp_set_num_threads(27)
-SEED = 42
-torch.manual_seed(SEED)
+# torch.set_num_threads(27)
+# faiss.omp_set_num_threads(27)
+# SEED = 42
+# torch.manual_seed(SEED)
 
 Offsets = dict[int, dict[int, int]]
 
@@ -119,7 +117,7 @@ class LMI:
             start, stop = nth_bucket * k, (nth_bucket + 1) * k
             Ds[start:stop], Is[start:stop] = D, I
 
-        dists, indices_to_keep = torch.topk(Ds, k)
+        dists, indices_to_keep = torch.topk(Ds, k, largest=True)
 
         return dists, Is[indices_to_keep], query_idx
 
@@ -127,20 +125,15 @@ class LMI:
     def search(self, queries: Tensor, k: int, nprobe: int = 100) -> tuple[np.ndarray, np.ndarray]:
         predicted_bucket_ids = self._predict(queries, nprobe)
         n_queries = queries.shape[0]
+
         D = np.empty((n_queries, k), dtype=np.float32)
         I = np.empty((n_queries, k), dtype=np.int32)
 
-        torch.set_num_threads(3)
-        faiss.omp_set_num_threads(3)
+        for i in range(n_queries):
+            dists, nns, query_id = self._visit_buckets(k, predicted_bucket_ids[i], queries[i : i + 1], i, nprobe)
 
-        with ThreadPoolExecutor(max_workers=9) as executor:
-            results = executor.map(
-                lambda i: self._visit_buckets(k, predicted_bucket_ids[i], queries[i : i + 1], i, nprobe),
-                range(n_queries),
-            )
-            for dists, nns, query_id in tqdm(results, total=n_queries):
-                D[query_id, :] = dists
-                I[query_id, :] = nns
+            D[query_id, :] = dists
+            I[query_id, :] = nns
 
         return D, I
 
@@ -219,8 +212,8 @@ class LMI:
 
         offsets = self._create_offsets(classes, n_chunks, chunk_size)
 
-        with ThreadPoolExecutor() as executor:
-            executor.map(lambda x: self._bucket_init(classes, x), range(self.n_buckets))
+        for i in range(self.n_buckets):
+            self._bucket_init(classes, i)
 
         logger.debug('First part done')
 
@@ -230,12 +223,12 @@ class LMI:
 
     @utils.measure_runtime
     @staticmethod
-    def _run_kmeans(n_buckets: int, data_dim: int, X_train: Tensor) -> Tensor:
+    def _run_kmeans(n_buckets: int, data_dim: int, X_train: Tensor, seed: int) -> Tensor:
         kmeans = faiss.Kmeans(
             d=data_dim,
             k=n_buckets,
             verbose=False,
-            seed=SEED,
+            seed=seed,
             spherical=True,
         )
         kmeans.train(X_train)
@@ -247,93 +240,82 @@ class LMI:
         dataset: Path,
         epochs: int,
         lr: float,
-        sample_size: int,
         n_buckets: int,
         chunk_size: int,
-    ) -> LMI:
-        n_data, data_dim = utils.get_dataset_shape(dataset)
-        X_train = utils.sample_train_subset(dataset, n_data, data_dim, sample_size, chunk_size)
+        seed: int,
+    ) -> tuple[LMI, tuple[int, int]]:
+        X_train = utils.load_all_data(dataset)
+        logger.debug(f'Training on {X_train.shape[0]} objects with {X_train.shape[1]} dimensions')
 
-        logger.debug(f'Training on {X_train.shape[0]} subset from {n_data} dataset')
-
-        y = LMI._run_kmeans(n_buckets, data_dim, X_train)
+        y = LMI._run_kmeans(n_buckets, X_train.shape[1], X_train, seed)
 
         nn = Sequential(
-            Linear(data_dim, 512),
+            Linear(X_train.shape[1], 512),
             ReLU(),
             Linear(512, n_buckets),
         )
 
         LMI._train_model(nn, X_train, y, epochs, lr)
 
-        del X_train
-        gc.collect()
-
-        lmi = LMI(n_buckets, data_dim, nn)
+        lmi = LMI(n_buckets, X_train.shape[1], nn)
 
         # Store the vectors and their IDs in the corresponding buckets
-        lmi._create_buckets(dataset, n_data, chunk_size)
+        lmi._create_buckets(dataset, X_train.shape[0], chunk_size)
 
-        return lmi
+        return lmi, X_train.shape
 
 
 def task1(
-    dataset_size: str,
+    dataset_name: str,
     epochs: int,
     lr: float,
-    sample_size: int,
-    alpha: float,
-    # nprobe: int,
+    n_buckets: int,
     chunk_size: int,
+    seed: int,
 ) -> None:
-    dataset = Path(f'data2024/laion2B-en-clip768v2-n={dataset_size}.h5')
-
-    n_buckets = int(alpha * sqrt(utils.get_dataset_size(dataset)))
+    dataset = Path(f'data/{dataset_name}.hdf5')
 
     start = time.time()
-    lmi = LMI.create(dataset, epochs, lr, sample_size, n_buckets, chunk_size)
+    lmi, dataset_shape = LMI.create(dataset, epochs, lr, n_buckets, chunk_size, seed)
     buildtime = time.time() - start
 
-    queries = utils.load_queries()
+    queries = utils.load_queries(dataset_name)
+    n_queries = queries.shape[0]
 
-    k = 30
+    k = 10  # Same as BLISS
 
-    nprobes = range(1, 30 + 1)
-    if dataset_size == '300K':
-        nprobes = [1]
-
-    for nprobe in nprobes:
+    for nprobe in [5, 10, 15, 20, 50, 100]:  # Same as BLISS
         start = time.time()
         D, I = lmi.search(queries, k, nprobe)
         searchtime = time.time() - start
 
-        identifier = f't1-{dataset_size}-epochs={epochs}-lr={lr}-sample={sample_size}-alpha={alpha}-chunk_size={chunk_size}-nprobe={nprobe}'
-        modelingtime, encdatabasetime, encqueriestime = 0.0, 0.0, 0.0
+        identifier = f'epochs={epochs}-lr={lr}-n_buckets={n_buckets}-chunk_size={chunk_size}-seed={seed}-nprobe={nprobe}'
 
         utils.store_results(
-            Path('result/') / 'task1' / dataset_size / f'{identifier}.h5',
+            Path('result/') / f'{dataset_name}-{identifier}.hdf5',
             'lmi',
             D,
-            I + 1,
-            modelingtime,
-            encdatabasetime,
-            encqueriestime,
+            I,
             buildtime,
             searchtime,
             identifier,
-            dataset_size,
+            dataset_shape[0],
+            dataset_shape[1],
+            n_queries,
         )
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--epochs', type=int, default=15)
-    parser.add_argument('--lr', type=float, default=0.00098)
-    parser.add_argument('--sample-size', type=int, default=1_000_000)
-    parser.add_argument('--alpha', type=float, default=1.0)
-    # parser.add_argument('--nprobe', type=int, default=5)
-    parser.add_argument('--dataset-size', type=str, default='100M')
-    parser.add_argument('--chunk-size', type=int, default=1_000_000)
+    parser.add_argument('--dataset-name', type=str, required=True)
+    parser.add_argument('--epochs', type=int, default=20)  # Same as BLISS
+    parser.add_argument('--lr', type=float, default=0.001)  # Same as BLISS
+    parser.add_argument('--n-buckets', type=int, default=4_096)  # Same as BLISS
+    parser.add_argument('--chunk-size', type=int, default=100_000)
     args = parser.parse_args()
 
-    task1(**vars(args))
+    seed = int(torch.randint(0, 1_000_000, (1,)))
+    torch.manual_seed(seed)
+    logger.debug(f'Seed: {seed}')
+
+    task1(**vars(args), seed=seed)
