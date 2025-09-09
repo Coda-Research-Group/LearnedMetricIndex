@@ -287,7 +287,7 @@ def task1(
     for nprobe in [5, 10, 15, 20, 50, 100]:  # Same as BLISS
         start = time.time()
         D, I = lmi.search(queries, k, nprobe)
-        searchtime = time.time() - start
+        querytime = time.time() - start
 
         identifier = f'epochs={epochs}-lr={lr}-n_buckets={n_buckets}-chunk_size={chunk_size}-seed={seed}-nprobe={nprobe}'
 
@@ -297,7 +297,7 @@ def task1(
             D,
             I,
             buildtime,
-            searchtime,
+            querytime,
             identifier,
             dataset_shape[0],
             dataset_shape[1],
@@ -319,3 +319,5 @@ if __name__ == '__main__':
     logger.debug(f'Seed: {seed}')
 
     task1(**vars(args), seed=seed)
+
+    logger.info('Done')
