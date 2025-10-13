@@ -25,7 +25,7 @@ In addition, the script includes an evaluation of the obtained result
 
 ```shell
 # Download the dataset to your local machine
-wget 'https://sisap-23-challenge.s3.amazonaws.com/SISAP23-Challenge/laion2B-en-clip768v2-n=100K.h5'
+wget 'https://huggingface.co/datasets/Coda-Research-Group/SISAP_2023_Indexing_Challenge/resolve/main/laion2B-en-clip768v2-n%3D100K.h5'
 
 # Setup the environment and install the dependencies
 conda create -n lmi-starterpack python=3.12
@@ -37,3 +37,8 @@ pip install torch --index-url https://download.pytorch.org/whl/cpu
 # Run the code
 python3 lmi.py
 ```
+
+## Your task
+
+- [ ] Experiment with varying hyperparameters of the model and the index. Observe how the recall changes as you increase and decrease the number of epochs, the number of buckets, and so on.
+- [ ] Extend the search method to traverse multiple buckets and aggregate the neighbors. Observe how the recall changes as you increase the number of buckets visited.
