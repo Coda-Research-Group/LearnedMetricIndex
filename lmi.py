@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from faiss import METRIC_L2, Kmeans, knn  # isort: skip
+
 import h5py
 import torch
-from faiss import METRIC_L2, Kmeans, knn
 from torch import Tensor
 from torch.nn import CrossEntropyLoss, Linear, ReLU, Sequential
 from torch.nn.functional import softmax
@@ -139,20 +140,29 @@ if __name__ == "__main__":
     n, d = X.shape
 
     # Create an instance of the LMI
+    print("Training the LMI...")
     lmi = LMI(n_buckets=320, data_dimensionality=d)
     lmi.train(X)
 
     # Obtain a query from the user -- here we sample a random query from the dataset
+    print("Sampling a random query from the dataset...")
     query = X[torch.randint(0, n, (1,))]
+
     # Number of neighbors to look for
     k = 10
+    print(f"Searching for the k={k} nearest neighbors...")
+
     # Search for the k nearest neighbors
     nearest_neighbors = lmi.search(query, k)
+    print(f"Nearest neighbors IDs: {set(nearest_neighbors.tolist())}")
 
     # Evaluate the accuracy of the LMI's result
+    print("Evaluating the accuracy of the LMI's result...")
 
     # Calculate the ground truth for the query over the whole dataset
-    ground_truth = torch.argsort(torch.cdist(query, X)).reshape(-1)[:k]
+    # ground_truth = torch.argsort(torch.cdist(query, X)).reshape(-1)[:k]
+    ground_truth = knn(query, X, k, metric=METRIC_L2)[1][0]
+    print(f"Ground truth IDs: {set(ground_truth.tolist())}")
 
     # Calculate the recall -- closer to 1 is better
     recall = (
