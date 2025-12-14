@@ -20,6 +20,11 @@ SEED = 42
 torch.manual_seed(SEED)
 
 
+def is_agnews(dataset: Path) -> bool:
+    with h5py.File(dataset, "r") as f:
+        return "train" in f and "test" in f and "neighbors" in f
+
+
 def measure_runtime(func: Callable) -> Callable:
     @functools.wraps(func)
     def wrapper_measure_runtime(*args, **kwargs) -> Any:  # noqa: ANN401, ANN002, ANN003
@@ -45,7 +50,6 @@ def store_results(  # noqa: PLR0913
     buildtime: float,
     querytime: float,
     params: str,
-    size: str,
 ) -> None:
     Path.mkdir(dst.parent, parents=True, exist_ok=True)
     f = h5py.File(dst, 'w')
@@ -55,7 +59,6 @@ def store_results(  # noqa: PLR0913
     f.attrs['encqueriestime'] = encqueriestime
     f.attrs['buildtime'] = buildtime
     f.attrs['querytime'] = querytime
-    f.attrs['size'] = size
     f.attrs['params'] = params
     f.create_dataset('knns', I.shape, dtype=I.dtype)[:] = I
     f.create_dataset('dists', D.shape, dtype=D.dtype)[:] = D
@@ -63,41 +66,61 @@ def store_results(  # noqa: PLR0913
 
 
 def get_dataset_shape(dataset: Path) -> tuple[int, int]:
-    return h5py.File(dataset, 'r')['emb'].shape  # type: ignore
+    with h5py.File(dataset, "r") as f:
+        if is_agnews(dataset):
+            return f["train"].shape
+        return f["emb"].shape
 
 
 def get_dataset_size(dataset: Path) -> int:
     return get_dataset_shape(dataset)[0]
 
 
-def load_queries() -> Tensor:
-    queries_path = Path('data2024/public-queries-2024-laion2B-en-clip768v2-n=10k.h5')
-    return torch.from_numpy(h5py.File(queries_path, 'r')['emb'][:]).to(torch.float32)  # type: ignore
+def load_queries(dataset: Path | None = None) -> Tensor:
+    # LAION path (unchanged)
+    if dataset is None or not is_agnews(dataset):
+        queries_path = Path(
+            "data2024/public-queries-2024-laion2B-en-clip768v2-n=10k.h5"
+        )
+        return torch.from_numpy(
+            h5py.File(queries_path, "r")["emb"][:]
+        ).to(torch.float32)
+
+    # AGNEWS
+    with h5py.File(dataset, "r") as f:
+        return torch.from_numpy(f["test"][:]).to(torch.float32)
 
 
-def load_ground_truth(dataset_size: str, k: int = 30) -> Tensor:
-    ground_truth_path = Path(f'data2024/gold-standard-dbsize={dataset_size}--public-queries-2024-laion2B-en-clip768v2-n=10k.h5')
-    return torch.from_numpy(h5py.File(ground_truth_path, 'r')['knns'][:, :k]).to(torch.float32)  # type: ignore
+def load_ground_truth(dataset: Path | str, k: int = 30) -> Tensor:
+    # LAION path (unchanged)
+    if isinstance(dataset, str):
+        gt_path = Path(
+            f"data2024/gold-standard-dbsize={dataset}"
+            "--public-queries-2024-laion2B-en-clip768v2-n=10k.h5"
+        )
+        return torch.from_numpy(
+            h5py.File(gt_path, "r")["knns"][:, :k]
+        ).to(torch.float32)
+
+    # AGNEWS
+    with h5py.File(dataset, "r") as f:
+        return torch.from_numpy(f["neighbors"][:, :k]).to(torch.int32)
 
 
-def load_indices(dataset: Path, n_data: int, dim: int, indices: Tensor, chunk_size: int) -> Tensor:
-    n_chunks = ceil(n_data / chunk_size)
+@measure_runtime
+def load_chunk(dataset: Path, start: int, stop: int) -> Tensor:
+    with h5py.File(dataset, "r") as f:
+        if is_agnews(dataset):
+            return torch.from_numpy(f["train"][start:stop])
+        return torch.from_numpy(f["emb"][start:stop])
 
-    X = torch.empty((len(indices), dim))
 
-    offset = 0
-    for chunk_i in range(n_chunks):
-        start, stop = chunk_i * chunk_size, (chunk_i + 1) * chunk_size
-
-        chunk_indices = indices[(start <= indices) & (stop > indices)] - start
-        if len(chunk_indices) == 0:
-            continue
-        chunk, _ = load_chunk(dataset, start, stop)
-
-        X[offset : offset + len(chunk_indices)] = chunk[chunk_indices]
-        del chunk
-        offset += len(chunk_indices)
-    return X
+@measure_runtime
+def load_real_data(dataset: Path, indices: Tensor) -> Tensor:
+    with h5py.File(dataset, "r") as f:
+        if is_agnews(dataset):
+            return torch.from_numpy(f["train"][indices])
+        return torch.from_numpy(f["emb"][indices])
 
 
 @measure_runtime
@@ -121,13 +144,3 @@ def sample_train_subset(dataset: Path, n_data: int, dim: int, n_sample: int, chu
         offset += len(chunk_sample_indices)
     gc.collect()
     return X
-
-
-@measure_runtime
-def load_chunk(data: Path, start: int, stop: int) -> Tensor:
-    return torch.from_numpy(h5py.File(data, 'r')['emb'][start:stop])  # type: ignore
-
-
-@measure_runtime
-def load_real_data(dataset: Path, indices: Tensor) -> Tensor:
-    return torch.from_numpy(h5py.File(dataset, 'r')['emb'][indices])  # type: ignore

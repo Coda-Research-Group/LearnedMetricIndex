@@ -48,7 +48,7 @@ class LMIDataset(Dataset):
 
 
 class LMI:
-    def __init__(self, n_buckets: int, data_dimensionality: int, model: Sequential):
+    def __init__(self, n_buckets: int, data_dimensionality: int, model: Sequential, metric: int):
         self.n_buckets: int = n_buckets
         """Number of buckets."""
         self.dimensionality: int = data_dimensionality
@@ -59,6 +59,7 @@ class LMI:
         """Mapping from bucket ID to the data in the bucket."""
         self.bucket_data_ids: dict[int, Tensor] = {}
         """Mapping from bucket ID to the indices of the data in the bucket."""
+        self.metric = metric
 
     @utils.measure_runtime
     @staticmethod
@@ -94,10 +95,12 @@ class LMI:
             return torch.full((k,), float('-inf'), dtype=torch.float32), torch.full((k,), -1)
 
         bucket_data = self.bucket_data[bucket].to(torch.float32)
-        D, I = faiss.knn(query, bucket_data, k, metric=faiss.METRIC_INNER_PRODUCT)
+        D, I = faiss.knn(query, bucket_data, k, metric=self.metric)
         del bucket_data
 
         temp_dist = torch.from_numpy(D[0])
+        if self.metric == faiss.METRIC_L2:
+            temp_dist = -temp_dist
         temp_answer = self.bucket_data_ids[bucket][I[0]]
 
         return temp_dist, temp_answer
@@ -269,7 +272,8 @@ class LMI:
         del X_train
         gc.collect()
 
-        lmi = LMI(n_buckets, data_dim, nn)
+        metric = faiss.METRIC_L2 if utils.is_agnews(dataset) else faiss.METRIC_INNER_PRODUCT
+        lmi = LMI(n_buckets, data_dim, nn, metric)
 
         # Store the vectors and their IDs in the corresponding buckets
         lmi._create_buckets(dataset, n_data, chunk_size)
@@ -278,15 +282,15 @@ class LMI:
 
 
 def task1(
-    dataset_size: str,
     epochs: int,
     lr: float,
     sample_size: int,
     alpha: float,
-    # nprobe: int,
     chunk_size: int,
 ) -> None:
-    dataset = Path(f'data2024/laion2B-en-clip768v2-n={dataset_size}.h5')
+    #dataset = Path(f'data2024/laion2B-en-clip768v2-n=300K.h5')
+    dataset = Path(f'data2024/laion2B-en-clip768v2-n=1M.h5')
+    #dataset = Path(f'data2024/agnews-mxbai-1024-euclidean.hdf5')
 
     n_buckets = int(alpha * sqrt(utils.get_dataset_size(dataset)))
 
@@ -294,34 +298,34 @@ def task1(
     lmi = LMI.create(dataset, epochs, lr, sample_size, n_buckets, chunk_size)
     buildtime = time.time() - start
 
-    queries = utils.load_queries()
+    queries = utils.load_queries(dataset)
 
     k = 30
 
-    nprobes = range(1, 30 + 1)
-    if dataset_size == '300K':
-        nprobes = [1]
+    nprobes = range(1, 10 + 1)
 
     for nprobe in nprobes:
         start = time.time()
         D, I = lmi.search(queries, k, nprobe)
         searchtime = time.time() - start
 
-        identifier = f't1-{dataset_size}-epochs={epochs}-lr={lr}-sample={sample_size}-alpha={alpha}-chunk_size={chunk_size}-nprobe={nprobe}'
+        identifier = f't1-epochs={epochs}-lr={lr}-sample={sample_size}-alpha={alpha}-chunk_size={chunk_size}-nprobe={nprobe}'
         modelingtime, encdatabasetime, encqueriestime = 0.0, 0.0, 0.0
 
+        if not (utils.is_agnews(dataset) or dataset == Path(f'data2024/laion2B-en-clip768v2-n=1M.h5')):
+            I = I + 1
+
         utils.store_results(
-            Path('result/') / 'task1' / dataset_size / f'{identifier}.h5',
+            Path('result/') / 'task1' / f'{identifier}.h5',
             'lmi',
             D,
-            I + 1,
+            I,
             modelingtime,
             encdatabasetime,
             encqueriestime,
             buildtime,
             searchtime,
             identifier,
-            dataset_size,
         )
 
 
@@ -331,8 +335,6 @@ if __name__ == '__main__':
     parser.add_argument('--lr', type=float, default=0.00098)
     parser.add_argument('--sample-size', type=int, default=1_000_000)
     parser.add_argument('--alpha', type=float, default=1.0)
-    # parser.add_argument('--nprobe', type=int, default=5)
-    parser.add_argument('--dataset-size', type=str, default='100M')
     parser.add_argument('--chunk-size', type=int, default=1_000_000)
     args = parser.parse_args()
 
